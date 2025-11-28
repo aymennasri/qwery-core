@@ -2,6 +2,7 @@ import type { SimpleSchema, Table, Column } from '@qwery/domain/entities';
 
 export interface ExtractSchemaOptions {
   dbPath: string;
+  viewName?: string;
 }
 
 export const extractSchema = async (
@@ -13,7 +14,8 @@ export const extractSchema = async (
 
   try {
     // Get schema information using DESCRIBE on the view
-    const schemaReader = await conn.runAndReadAll('DESCRIBE my_sheet');
+    const viewName = (opts.viewName || 'my_sheet').replace(/"/g, '""');
+    const schemaReader = await conn.runAndReadAll(`DESCRIBE "${viewName}"`);
     await schemaReader.readAll();
     const schemaRows = schemaReader.getRowObjectsJS() as Array<{
       column_name: string;
@@ -27,7 +29,7 @@ export const extractSchema = async (
     }));
 
     const table: Table = {
-      tableName: 'my_sheet',
+      tableName: opts.viewName || 'my_sheet',
       columns,
     };
 

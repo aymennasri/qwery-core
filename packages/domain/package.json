@@ -15,6 +15,7 @@
     "./exceptions": "./src/exceptions/index.ts",
     "./repositories": "./src/repositories/index.ts",
     "./common": "./src/common/index.ts",
+    "./common/roles": "./src/common/roles.ts",
     "./services": "./src/services/index.ts",
     "./enums": "./src/enums/index.ts",
     "./usecases": "./src/usecases/index.ts",
@@ -42,6 +43,9 @@
     "*": {
       "*": [
         "src/*"
+      ],
+      "common/roles": [
+        "src/common/roles.ts"
       ]
     }
   }

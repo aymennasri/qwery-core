@@ -2,22 +2,64 @@ import { generateObject } from 'ai';
 import { z } from 'zod';
 import { fromPromise } from 'xstate/actors';
 import { IntentSchema } from '../types';
-import { createAzure } from '@ai-sdk/azure';
+import { createAzure, type AzureOpenAIProviderSettings } from '@ai-sdk/azure';
 import { DETECT_INTENT_PROMPT } from '../prompts/detect-intent.prompt';
 
 export const detectIntent = async (text: string) => {
-  const azure = createAzure({
-    apiKey: process.env.AZURE_API_KEY,
-    resourceName: process.env.AZURE_RESOURCE_NAME,
-  });
+  try {
+    const apiKey = process.env.AZURE_API_KEY || process.env.VITE_AZURE_API_KEY;
+    const resourceName =
+      process.env.AZURE_RESOURCE_NAME || process.env.VITE_AZURE_RESOURCE_NAME;
+    const deployment =
+      process.env.AZURE_OPENAI_DEPLOYMENT ||
+      process.env.VITE_AZURE_OPENAI_DEPLOYMENT ||
+      'gpt-5-mini';
 
-  const result = await generateObject({
-    model: azure('gpt-5-mini'),
-    schema: IntentSchema,
-    prompt: DETECT_INTENT_PROMPT(text),
-  });
+    if (!apiKey || !resourceName) {
+      throw new Error(
+        'Azure credentials missing: AZURE_API_KEY and AZURE_RESOURCE_NAME required',
+      );
+    }
 
-  return result.object;
+    const azureOptions: AzureOpenAIProviderSettings = {
+      apiKey,
+      resourceName,
+      ...(process.env.AZURE_API_VERSION && {
+        apiVersion: process.env.AZURE_API_VERSION,
+      }),
+      ...(process.env.AZURE_OPENAI_BASE_URL && {
+        baseURL: process.env.AZURE_OPENAI_BASE_URL,
+      }),
+    };
+
+    const azure = createAzure(azureOptions);
+
+    // Add timeout to detect hanging calls
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(
+        () => reject(new Error('generateObject timeout after 30 seconds')),
+        30000,
+      );
+    });
+
+    const generatePromise = generateObject({
+      model: azure(deployment),
+      schema: IntentSchema,
+      prompt: DETECT_INTENT_PROMPT(text),
+    });
+
+    const result = await Promise.race([generatePromise, timeoutPromise]);
+    return result.object;
+  } catch (error) {
+    console.error(
+      '[detectIntent] ERROR:',
+      error instanceof Error ? error.message : String(error),
+    );
+    if (error instanceof Error && error.stack) {
+      console.error('[detectIntent] Stack:', error.stack);
+    }
+    throw error;
+  }
 };
 
 export const detectIntentActor = fromPromise(
@@ -28,10 +70,12 @@ export const detectIntentActor = fromPromise(
       inputMessage: string;
     };
   }): Promise<z.infer<typeof IntentSchema>> => {
-    console.log('input', input);
-    const intent = await detectIntent(input.inputMessage);
-
-    console.log('intent', intent);
-    return intent;
+    try {
+      const intent = await detectIntent(input.inputMessage);
+      return intent;
+    } catch (error) {
+      console.error('[detectIntentActor] ERROR:', error);
+      throw error;
+    }
   },
 );

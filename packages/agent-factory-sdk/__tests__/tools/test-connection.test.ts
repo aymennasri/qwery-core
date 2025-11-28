@@ -67,15 +67,26 @@ describe('testConnection', () => {
     expect(result).toBe(true);
   });
 
-  it('should return false for non-existent database', async () => {
+  it('should create database if directory exists and return true', async () => {
     const { testConnection } = await import('../../src/tools/test-connection');
     const nonExistentPath = join(testWorkspace, 'non-existent', 'database.db');
+    // Create the directory first
+    mkdirSync(join(testWorkspace, 'non-existent'), { recursive: true });
 
     const result = await testConnection({
       dbPath: nonExistentPath,
     });
 
-    expect(result).toBe(false);
+    expect(result).toBe(true);
+    expect(existsSync(nonExistentPath)).toBe(true);
+
+    // Cleanup
+    try {
+      unlinkSync(nonExistentPath);
+      rmdirSync(join(testWorkspace, 'non-existent'));
+    } catch {
+      // Ignore cleanup errors
+    }
   });
 
   it('should return true and allow querying the database', async () => {

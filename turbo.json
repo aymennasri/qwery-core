@@ -62,7 +62,8 @@
     "test": {
       "dependsOn": [
         "^topo"
-      ]
+      ],
+      "outputLogs": "errors-only"
     },
     "clean": {
       "cache": false

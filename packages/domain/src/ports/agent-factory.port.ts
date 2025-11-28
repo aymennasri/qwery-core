@@ -81,7 +81,7 @@ export class AgentRunner<T extends StateData> {
     this.history.push(normalizedInput);
     const messages = await this.generateReply(normalizedInput);
 
-    const reply = messages.at(-1)?.content ?? '';
+    const reply = messages[messages.length - 1]?.content ?? '';
     const { from, to } = this.transition(resolvedCommand);
     await this.emitSideEffects(from, to, resolvedCommand);
 
