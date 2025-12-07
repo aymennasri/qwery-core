@@ -356,7 +356,7 @@ export function SidebarNavigation({
                             'group/link flex min-w-0 items-center gap-2 transition-all duration-200',
                             {
                               'justify-center px-0': isCollapsed,
-                              'justify-start px-1.5': !isCollapsed,
+                              'justify-start': !isCollapsed,
                             },
                           );
 

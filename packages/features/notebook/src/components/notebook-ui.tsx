@@ -538,11 +538,15 @@ export function NotebookUI({
       ? workspaceMode === WorkspaceModeEnum.ADVANCED
       : true;
 
-  // Sync with notebook prop if provided
+  // Track last synced cells to prevent unnecessary resets
+  const lastSyncedCellsRef = useRef<string>('');
+
+  // Sync with notebook prop if provided, but only when cells actually change
   React.useEffect(() => {
     if (notebook?.cells) {
-      setCells(
-        notebook.cells.map((cell: Notebook['cells'][number]) => ({
+      // Create a stable string representation of cells for comparison
+      const cellsKey = JSON.stringify(
+        notebook.cells.map((cell) => ({
           query: cell.query,
           cellId: cell.cellId,
           cellType: cell.cellType,
@@ -551,6 +555,21 @@ export function NotebookUI({
           runMode: cell.runMode,
         })),
       );
+
+      // Only sync if cells actually changed
+      if (cellsKey !== lastSyncedCellsRef.current) {
+        lastSyncedCellsRef.current = cellsKey;
+        setCells(
+          notebook.cells.map((cell: Notebook['cells'][number]) => ({
+            query: cell.query,
+            cellId: cell.cellId,
+            cellType: cell.cellType,
+            datasources: cell.datasources,
+            isActive: cell.isActive,
+            runMode: cell.runMode,
+          })),
+        );
+      }
     }
   }, [notebook?.cells]);
 

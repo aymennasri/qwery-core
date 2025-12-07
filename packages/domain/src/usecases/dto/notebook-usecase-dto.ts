@@ -60,6 +60,7 @@ export type CellInput = {
 
 export type UpdateNotebookInput = {
   id: string;
+  projectId?: string; // Required when creating (notebook not found)
   title?: string;
   description?: string;
   cells?: CellInput[];

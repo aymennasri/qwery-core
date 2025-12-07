@@ -351,11 +351,12 @@ export type AgentContext = {
   previousMessages: UIMessage[]; // full UI messages history
   streamResult?:
     | ReturnType<typeof streamText>
-    | ReturnType<(typeof Experimental_Agent)['prototype']['stream']>; // holds the streaming result from AI SDK
+    | ReturnType<(typeof Experimental_Agent)['prototype']['stream']> // holds the streaming result from AI SDK
+    | null;
   intent: Intent;
-  error?: string;
+  error?: string | null;
   retryCount?: number; // Track retry attempts
-  lastError?: Error; // Store last error for retry logic
+  lastError?: Error | null; // Store last error for retry logic
   enhancementActors?: Array<{ id: string; ref: AnyActorRef }>; // Track spawned actors
 };
 

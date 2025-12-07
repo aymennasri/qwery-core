@@ -67,8 +67,13 @@ export const AgentUIWrapper = forwardRef<
   AgentUIWrapperProps
 >(function AgentUIWrapper({ conversationSlug, initialMessages }, ref) {
   const sendMessageRef = useRef<((text: string) => void) | null>(null);
-  const { repositories } = useWorkspace();
-  const { data: usage } = useGetUsage(conversationSlug);
+  const { repositories, workspace } = useWorkspace();
+  const { data: usage } = useGetUsage(
+    repositories.usage,
+    repositories.conversation,
+    conversationSlug,
+    workspace.userId,
+  );
   const queryClient = useQueryClient();
   useImperativeHandle(
     ref,
@@ -95,7 +100,7 @@ export const AgentUIWrapper = forwardRef<
       usage={convertUsage(usage)}
       emitFinish={() => {
         queryClient.invalidateQueries({
-          queryKey: getUsageKey(conversationSlug),
+          queryKey: getUsageKey(conversationSlug, workspace.userId),
         });
       }}
     />

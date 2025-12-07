@@ -2,7 +2,13 @@ import { Entity } from '../common/entity';
 import { z } from 'zod';
 import { CellTypeSchema } from '../enums/cellType';
 import { RunModeSchema } from '../enums/runMode';
-import { Exclude, Expose, plainToClass, Type } from 'class-transformer';
+import {
+  Exclude,
+  Expose,
+  instanceToPlain,
+  plainToClass,
+  Type,
+} from 'class-transformer';
 import { generateIdentity } from '../utils/identity.generator';
 import { CreateNotebookInput, UpdateNotebookInput } from '../usecases';
 
@@ -121,6 +127,10 @@ export class NotebookEntity extends Entity<string, typeof NotebookSchema> {
       updatedAt: date,
     };
 
-    return plainToClass(NotebookEntity, NotebookSchema.parse(updatedNotebook));
+    const transformed = plainToClass(NotebookEntity, updatedNotebook);
+
+    const plainData = instanceToPlain(transformed) as Notebook;
+
+    return plainToClass(NotebookEntity, NotebookSchema.parse(plainData));
   }
 }

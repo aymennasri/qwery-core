@@ -204,34 +204,32 @@ export default function NotebookPage() {
     });
   };
 
-  const normalizedNotebook: Notebook | undefined = (() => {
-    if (!notebook.data) {
-      return undefined;
-    }
+  const normalizedNotebook: Notebook | undefined = !notebook.data
+    ? undefined
+    : (() => {
+        const createdAt =
+          notebook.data.createdAt instanceof Date
+            ? notebook.data.createdAt
+            : new Date(notebook.data.createdAt);
+        const updatedAt =
+          notebook.data.updatedAt instanceof Date
+            ? notebook.data.updatedAt
+            : new Date(notebook.data.updatedAt);
 
-    const createdAt =
-      notebook.data.createdAt instanceof Date
-        ? notebook.data.createdAt
-        : new Date(notebook.data.createdAt);
-    const updatedAt =
-      notebook.data.updatedAt instanceof Date
-        ? notebook.data.updatedAt
-        : new Date(notebook.data.updatedAt);
-
-    return {
-      ...notebook.data,
-      createdAt,
-      updatedAt,
-      cells: notebook.data.cells.map((cell) => ({
-        ...cell,
-        datasources: cell.datasources || [],
-        cellType: cell.cellType || 'text',
-        cellId: cell.cellId || 0,
-        isActive: cell.isActive ?? true,
-        runMode: cell.runMode || 'default',
-      })),
-    } as Notebook;
-  })();
+        return {
+          ...notebook.data,
+          createdAt,
+          updatedAt,
+          cells: notebook.data.cells.map((cell) => ({
+            ...cell,
+            datasources: cell.datasources || [],
+            cellType: cell.cellType || 'text',
+            cellId: cell.cellId || 0,
+            isActive: cell.isActive ?? true,
+            runMode: cell.runMode || 'default',
+          })),
+        } as Notebook;
+      })();
 
   // Track current unsaved state
   const currentNotebookStateRef = useRef<{

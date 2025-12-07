@@ -14,7 +14,15 @@ export default defineConfig(({ command }) => ({
       command === 'build'
         ? true
         : ['posthog-js', '@posthog/react', 'streamdown'],
-    external: ['better-sqlite3', '@duckdb/node-api'],
+    external: [
+      'better-sqlite3',
+      '@duckdb/node-api',
+      '@duckdb/node-bindings-linux-arm64',
+      '@duckdb/node-bindings-linux-x64',
+      '@duckdb/node-bindings-darwin-arm64',
+      '@duckdb/node-bindings-darwin-x64',
+      '@duckdb/node-bindings-win32-x64',
+    ],
   },
   plugins: [
     devtoolsJson(),
@@ -39,6 +47,10 @@ export default defineConfig(({ command }) => ({
         if (id === 'fsevents') return true;
         if (id === 'better-sqlite3') return true;
         if (id === '@duckdb/node-api') return true;
+        if (id.startsWith('@duckdb/node-bindings')) return true;
+        if (id.includes('@duckdb/node-bindings') && id.endsWith('.node')) {
+          return true;
+        }
         if (id.startsWith('node:')) return true;
         return false;
       },

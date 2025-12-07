@@ -17,6 +17,7 @@ export const PLAYGROUNDS = [
       description:
         'PostgreSQL is a powerful, open source object-relational database system.',
       datasource_provider: 'pglite',
+      datasource_driver: 'pglite',
       datasource_kind: DatasourceKind.EMBEDDED,
       config: {},
     },

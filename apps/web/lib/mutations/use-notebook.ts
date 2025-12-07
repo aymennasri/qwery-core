@@ -3,6 +3,11 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Notebook } from '@qwery/domain/entities';
 import { INotebookRepository } from '@qwery/domain/repositories';
 import {
+  DeleteNotebookService,
+  UpdateNotebookService,
+} from '@qwery/domain/services';
+import { NotebookOutput, UpdateNotebookInput } from '@qwery/domain/usecases';
+import {
   getNotebookKey,
   getNotebooksByProjectIdKey,
 } from '../queries/use-get-notebook';
@@ -15,27 +20,40 @@ export function useNotebook(
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (notebook: Notebook) => {
-      try {
-        return await notebookRepository.update(notebook);
-      } catch (error) {
-        if (
-          error instanceof Error &&
-          error.message.toLowerCase().includes('not found')
-        ) {
-          return await notebookRepository.create(notebook);
-        }
-        throw error;
-      }
+    mutationFn: async (notebook: Notebook): Promise<NotebookOutput> => {
+      const updateNotebookService = new UpdateNotebookService(
+        notebookRepository,
+      );
+
+      const updateInput: UpdateNotebookInput = {
+        id: notebook.id,
+        projectId: notebook.projectId,
+        title: notebook.title,
+        description: notebook.description,
+        cells: notebook.cells.map((cell) => ({
+          query: cell.query,
+          cellType: cell.cellType,
+          cellId: cell.cellId,
+          datasources: cell.datasources,
+          isActive: cell.isActive,
+          runMode: cell.runMode,
+        })),
+        datasources: notebook.datasources,
+      };
+
+      return await updateNotebookService.execute(updateInput);
     },
-    onSuccess: (notebook: Notebook) => {
+    onSuccess: (notebookOutput: NotebookOutput) => {
+      // Update the cache directly to avoid refetch that would reset user's typing
+      queryClient.setQueryData(
+        getNotebookKey(notebookOutput.slug),
+        notebookOutput,
+      );
+      // Invalidate the list query to refresh metadata in lists
       queryClient.invalidateQueries({
-        queryKey: getNotebookKey(notebook.slug),
+        queryKey: getNotebooksByProjectIdKey(notebookOutput.projectId),
       });
-      queryClient.invalidateQueries({
-        queryKey: getNotebooksByProjectIdKey(notebook.projectId),
-      });
-      onSuccess(notebook);
+      onSuccess(notebookOutput as unknown as Notebook);
     },
     onError,
   });
@@ -56,7 +74,10 @@ export function useDeleteNotebook(
 
   return useMutation({
     mutationFn: async (input: DeleteNotebookInput) => {
-      await notebookRepository.delete(input.id);
+      const deleteNotebookService = new DeleteNotebookService(
+        notebookRepository,
+      );
+      await deleteNotebookService.execute(input.id);
       return input;
     },
     onSuccess: (input) => {
