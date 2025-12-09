@@ -35,7 +35,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const updatedContent =
       typeof content === 'string'
         ? { text: content }
-        : typeof content === 'object' && content !== null && 'parts' in content
+        : typeof content === 'object' &&
+            content !== null &&
+            !(content instanceof Date) &&
+            !(content instanceof RegExp) &&
+            'parts' in content
           ? content
           : content;
 

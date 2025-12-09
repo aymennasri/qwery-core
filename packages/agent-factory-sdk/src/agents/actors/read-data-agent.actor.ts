@@ -119,6 +119,16 @@ export class ReadDataAgent {
     this.conversationId = opts.conversationId;
   }
 
+  /**
+   * Sanitizes a string for safe logging to prevent format string and log injection attacks.
+   * Removes control characters and limits length.
+   */
+  private sanitizeForLog(value: string): string {
+    // Remove control characters and limit length to prevent log injection
+    // eslint-disable-next-line no-control-regex -- Intentional: removing control chars for security
+    return value.replace(/[\x00-\x1F\x7F-\x9F]/g, '').substring(0, 200);
+  }
+
   async getAgent(): Promise<ReturnType<ReadDataAgent['createAgent']>> {
     if (!this.agentPromise) {
       this.agentPromise = this.initializeAgent();
@@ -226,9 +236,12 @@ export class ReadDataAgent {
             const uniqueLinks = [...new Set(links)];
             const duplicateCount = originalLinkCount - uniqueLinks.length;
             if (duplicateCount > 0) {
-              console.debug(
-                `[ReadDataAgent:${this.conversationId}] Removed ${duplicateCount} duplicate link(s). Processing ${uniqueLinks.length} unique link(s) from ${originalLinkCount} total.`,
-              );
+              console.debug('[ReadDataAgent] Removed duplicate link(s)', {
+                conversationId: this.sanitizeForLog(this.conversationId),
+                duplicateCount,
+                uniqueLinksCount: uniqueLinks.length,
+                originalLinkCount,
+              });
             }
             links = uniqueLinks;
 
@@ -256,9 +269,10 @@ export class ReadDataAgent {
             const existingNamesSet = new Set(existing.map((r) => r.viewName));
 
             // Sequential processing
-            console.debug(
-              `[ReadDataAgent:${this.conversationId}] Processing ${links.length} links sequentially`,
-            );
+            console.debug('[ReadDataAgent] Processing links sequentially', {
+              conversationId: this.sanitizeForLog(this.conversationId),
+              linkCount: links.length,
+            });
 
             const existingNames = Array.from(existingNamesSet);
 
@@ -297,13 +311,22 @@ export class ReadDataAgent {
                     }
                   } catch (validateError) {
                     console.warn(
-                      `[ReadDataAgent:${this.conversationId}] Error validating existing view:`,
-                      validateError,
+                      '[ReadDataAgent] Error validating existing view',
+                      {
+                        conversationId: this.sanitizeForLog(
+                          this.conversationId,
+                        ),
+                        error: validateError,
+                      },
                     );
                   }
                   // View in registry but not in DB - recreate it
                   console.debug(
-                    `[ReadDataAgent:${this.conversationId}] View in registry but missing in DB, recreating: ${existingRecord.viewName}`,
+                    '[ReadDataAgent] View in registry but missing in DB, recreating',
+                    {
+                      conversationId: this.sanitizeForLog(this.conversationId),
+                      viewName: this.sanitizeForLog(existingRecord.viewName),
+                    },
                   );
                   try {
                     await gsheetToDuckdb({
@@ -336,7 +359,11 @@ export class ReadDataAgent {
                   .substring(2, 8)}`;
 
                 console.debug(
-                  `[ReadDataAgent:${this.conversationId}] Creating DuckDB view from sheet: ${link}`,
+                  '[ReadDataAgent] Creating DuckDB view from sheet',
+                  {
+                    conversationId: this.sanitizeForLog(this.conversationId),
+                    link: this.sanitizeForLog(link),
+                  },
                 );
 
                 let schema;
@@ -459,15 +486,23 @@ export class ReadDataAgent {
                     });
                   } catch (bgError) {
                     console.warn(
-                      `[ReadDataAgent:${this.conversationId}] Background context enhancement failed:`,
-                      bgError,
+                      '[ReadDataAgent] Background context enhancement failed',
+                      {
+                        conversationId: this.sanitizeForLog(
+                          this.conversationId,
+                        ),
+                        error: bgError,
+                      },
                     );
                   }
                 } catch (contextError) {
                   // Non-critical - log but don't fail
                   console.warn(
-                    `[ReadDataAgent:${this.conversationId}] Failed to build business context:`,
-                    contextError,
+                    '[ReadDataAgent] Failed to build business context',
+                    {
+                      conversationId: this.sanitizeForLog(this.conversationId),
+                      error: contextError,
+                    },
                   );
                 }
 
@@ -483,8 +518,12 @@ export class ReadDataAgent {
                 const errorStack =
                   error instanceof Error ? error.stack : undefined;
                 console.error(
-                  `[ReadDataAgent:${this.conversationId}] Failed to create view from ${link}:`,
-                  error,
+                  '[ReadDataAgent] Failed to create view from sheet',
+                  {
+                    conversationId: this.sanitizeForLog(this.conversationId),
+                    link: this.sanitizeForLog(link),
+                    error,
+                  },
                 );
                 results.push({
                   success: false,
@@ -776,14 +815,20 @@ export class ReadDataAgent {
                   });
                 } catch (error) {
                   console.warn(
-                    `[ReadDataAgent:${this.conversationId}] Background context enhancement failed:`,
-                    error,
+                    '[ReadDataAgent] Background context enhancement failed',
+                    {
+                      conversationId: this.sanitizeForLog(this.conversationId),
+                      error,
+                    },
                   );
                 }
               } catch (contextError) {
                 console.warn(
-                  `[ReadDataAgent:${this.conversationId}] Failed to build business context:`,
-                  contextError,
+                  '[ReadDataAgent] Failed to build business context',
+                  {
+                    conversationId: this.sanitizeForLog(this.conversationId),
+                    error: contextError,
+                  },
                 );
               }
             }
