@@ -39,6 +39,15 @@ export async function initializeDatasources(
     return [];
   }
 
+  // FILTER: Only initialize checked datasources if checkedDatasourceIds provided
+  const datasourcesToInitialize = checkedDatasourceIds
+    ? datasourceIds.filter((id) => checkedDatasourceIds.includes(id))
+    : datasourceIds;
+
+  if (datasourcesToInitialize.length === 0) {
+    return [];
+  }
+
   // Get central instance
   const instanceWrapper = await DuckDBInstanceManager.getInstance({
     conversationId,
@@ -52,8 +61,11 @@ export async function initializeDatasources(
     workspace,
   );
 
-  // Load all datasources
-  const loaded = await loadDatasources(datasourceIds, datasourceRepository);
+  // Load only the datasources we're initializing
+  const loaded = await loadDatasources(
+    datasourcesToInitialize,
+    datasourceRepository,
+  );
   const { duckdbNative, foreignDatabases } = groupDatasourcesByType(loaded);
 
   const results: InitializationResult[] = [];
@@ -127,15 +139,9 @@ export async function initializeDatasources(
       }
     }
 
-    // Sync state with checked datasources if provided
-    if (checkedDatasourceIds) {
-      await DuckDBInstanceManager.syncDatasources(
-        conversationId,
-        workspace,
-        checkedDatasourceIds,
-        datasourceRepository,
-      );
-    }
+    // REMOVE: The syncDatasources call - we already initialized only checked ones
+    // If checkedDatasourceIds was provided, we only initialized those
+    // If not provided, we initialized all (backward compatibility)
   } finally {
     // Return connection to pool (don't close)
     DuckDBInstanceManager.returnConnection(conversationId, workspace, conn);

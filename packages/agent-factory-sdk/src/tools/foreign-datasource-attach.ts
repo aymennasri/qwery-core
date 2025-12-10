@@ -354,10 +354,10 @@ export async function attachForeignDatasource(
             errorMsg.includes('relation');
 
           if (isPermissionError) {
-            console.debug(
-              `[ForeignDatasourceAttach] Skipping table ${schemaName}.${tableName} (${errorMsg})`,
-            );
+            // REMOVE: console.debug - just skip silently
+            // Permission errors are expected for system tables or restricted schemas
           } else {
+            // Only log unexpected errors
             console.warn(
               `[ForeignDatasourceAttach] Cannot access table ${schemaName}.${tableName}: ${errorMsg}`,
             );

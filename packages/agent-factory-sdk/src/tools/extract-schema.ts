@@ -60,25 +60,41 @@ export const extractSchema = async (
         table_name: string;
       }>;
 
-      // Import validation function
+      // Import system schema filter utilities
+      const { getAllSystemSchemas, isSystemTableName } = await import(
+        './system-schema-filter'
+      );
+      const allSystemSchemas = getAllSystemSchemas();
       const { isSystemOrTempTable } = await import('./view-registry');
 
       // Filter out known system views and temp tables - only return views that look like user-created views
       const views = allViews.filter((v) => {
         const name = v.table_name;
+
         // Exclude system/temp tables
         if (isSystemOrTempTable(name)) {
-          return false;
+          return false; // NO LOGGING
         }
-        // Exclude views with dots (schema-qualified) or special characters
+
+        // Exclude system tables using consistent filter
+        if (isSystemTableName(name)) {
+          return false; // NO LOGGING
+        }
+
+        // Exclude views with dots (schema-qualified) that are system schemas
         const nameLower = name.toLowerCase();
-        if (
-          nameLower.includes('.') ||
-          nameLower.includes('$') ||
-          nameLower.includes('#')
-        ) {
-          return false;
+        if (nameLower.includes('.')) {
+          const parts = nameLower.split('.');
+          if (parts.length >= 2 && allSystemSchemas.has(parts[0] || '')) {
+            return false; // NO LOGGING
+          }
         }
+
+        // Exclude special characters
+        if (nameLower.includes('$') || nameLower.includes('#')) {
+          return false; // NO LOGGING
+        }
+
         return true;
       });
 

@@ -84,6 +84,18 @@ class DuckDBInstanceManager {
   }
 
   /**
+   * Get the wrapper for a conversation (for accessing viewRegistry, etc.)
+   * Returns null if instance doesn't exist
+   */
+  getWrapper(
+    conversationId: string,
+    workspace: string,
+  ): DuckDBInstanceWrapper | null {
+    const key = `${workspace}:${conversationId}`;
+    return this.instances.get(key) || null;
+  }
+
+  /**
    * Get a connection from the pool (or create one if pool is empty)
    */
   async getConnection(
@@ -153,7 +165,7 @@ class DuckDBInstanceManager {
     datasourceRepository: IDatasourceRepository,
   ): Promise<void> {
     console.log(
-      `[DuckDBInstanceManager] Syncing datasources for conversation ${conversationId}, checked: [${checkedDatasourceIds.join(', ')}]`,
+      `[DuckDBInstanceManager] Syncing ${checkedDatasourceIds.length} datasource(s) for conversation ${conversationId}`,
     );
 
     const wrapper = await this.getInstance({
@@ -169,9 +181,7 @@ class DuckDBInstanceManager {
       const currentAttached = wrapper.attachedDatasources;
       const currentViews = wrapper.viewRegistry;
 
-      console.log(
-        `[DuckDBInstanceManager] Current state - Attached: [${Array.from(currentAttached).join(', ')}], Views: [${Array.from(currentViews.keys()).join(', ')}]`,
-      );
+      // REMOVE: Verbose state logging - only log if needed for debugging
 
       // Load all datasources to get their types
       const allDatasourceIds = Array.from(
@@ -187,14 +197,10 @@ class DuckDBInstanceManager {
       for (const { datasource } of foreignDatabases) {
         const dsId = datasource.id;
         if (currentAttached.has(dsId) && !checkedSet.has(dsId)) {
-          console.log(
-            `[DuckDBInstanceManager] Detaching unchecked foreign datasource: ${dsId}`,
-          );
+          console.log(`[DuckDBInstanceManager] Detaching datasource: ${dsId}`);
           await this.detachForeignDB(conn, dsId);
           currentAttached.delete(dsId);
-          console.log(
-            `[DuckDBInstanceManager] Detached datasource ${dsId} (unchecked)`,
-          );
+          console.log(`[DuckDBInstanceManager] Detached: ${dsId}`);
         }
       }
 
@@ -206,7 +212,7 @@ class DuckDBInstanceManager {
             await conn.run(`DROP VIEW IF EXISTS "${escapedViewName}"`);
             currentViews.delete(dsId);
             console.log(
-              `[DuckDBInstanceManager] Dropped view ${viewName} for datasource ${dsId} (unchecked)`,
+              `[DuckDBInstanceManager] Dropped view: ${viewName} (datasource: ${dsId})`,
             );
           } catch (error) {
             const errorMsg =
@@ -223,17 +229,13 @@ class DuckDBInstanceManager {
         const dsId = datasource.id;
         if (!currentAttached.has(dsId) && checkedSet.has(dsId)) {
           try {
-            console.log(
-              `[DuckDBInstanceManager] Attaching checked foreign datasource: ${dsId}`,
-            );
+            console.log(`[DuckDBInstanceManager] Attaching datasource: ${dsId}`);
             await attachForeignDatasource({
               connection: conn,
               datasource,
             });
             currentAttached.add(dsId);
-            console.log(
-              `[DuckDBInstanceManager] Attached datasource ${dsId} (checked)`,
-            );
+            console.log(`[DuckDBInstanceManager] Attached: ${dsId}`);
           } catch (error) {
             const errorMsg =
               error instanceof Error ? error.message : String(error);
@@ -255,7 +257,7 @@ class DuckDBInstanceManager {
             });
             currentViews.set(dsId, result.viewName);
             console.log(
-              `[DuckDBInstanceManager] Created view ${result.viewName} for datasource ${dsId} (checked)`,
+              `[DuckDBInstanceManager] Created view: ${result.viewName} (datasource: ${dsId})`,
             );
           } catch (error) {
             const errorMsg =
