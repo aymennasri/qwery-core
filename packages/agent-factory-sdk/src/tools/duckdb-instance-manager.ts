@@ -3,6 +3,8 @@ import type { IDatasourceRepository } from '@qwery/domain/repositories';
 import { loadDatasources, groupDatasourcesByType } from './datasource-loader';
 import { attachForeignDatasource } from './foreign-datasource-attach';
 import { datasourceToDuckdb } from './datasource-to-duckdb';
+import { getDatasourceDatabaseName } from './datasource-name-utils';
+import type { Datasource } from '@qwery/domain/entities';
 
 // Connection type from DuckDB instance
 type Connection = Awaited<ReturnType<DuckDBInstance['connect']>>;
@@ -199,7 +201,7 @@ class DuckDBInstanceManager {
         const dsId = datasource.id;
         if (currentAttached.has(dsId) && !checkedSet.has(dsId)) {
           console.log(`[DuckDBInstanceManager] Detaching datasource: ${dsId}`);
-          await this.detachForeignDB(conn, dsId);
+          await this.detachForeignDB(conn, datasource);
           currentAttached.delete(dsId);
           console.log(`[DuckDBInstanceManager] Detached: ${dsId}`);
         }
@@ -282,9 +284,9 @@ class DuckDBInstanceManager {
    */
   private async detachForeignDB(
     conn: Connection,
-    datasourceId: string,
+    datasource: Datasource,
   ): Promise<void> {
-    const attachedDatabaseName = `ds_${datasourceId.replace(/-/g, '_')}`;
+    const attachedDatabaseName = getDatasourceDatabaseName(datasource);
     const escapedDbName = attachedDatabaseName.replace(/"/g, '""');
 
     try {

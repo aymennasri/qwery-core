@@ -1,14 +1,12 @@
 /**
  * Provider Registry - Abstraction layer for mapping datasource providers to DuckDB foreign database types
- * 
+ *
  * This module provides a clean abstraction that:
  * 1. Maps any datasource provider ID to its underlying DuckDB foreign database type
  * 2. Handles connection string extraction from config
  * 3. Generates appropriate table queries per database type
  * 4. Uses extension discovery to dynamically determine mappings
  */
-
-import type { Datasource } from '@qwery/domain/entities';
 
 export type DuckDBForeignType = 'POSTGRES' | 'MYSQL' | 'SQLITE';
 
@@ -79,12 +77,8 @@ export async function getProviderMapping(
     if (pattern.test(provider)) {
       return {
         ...mapping,
-        getConnectionString: getConnectionStringForType(
-          mapping.duckdbType,
-        ),
-        getTablesQuery: getTablesQueryForType(
-          mapping.duckdbType,
-        ),
+        getConnectionString: getConnectionStringForType(mapping.duckdbType),
+        getTablesQuery: getTablesQueryForType(mapping.duckdbType),
       };
     }
   }
@@ -128,7 +122,7 @@ function getConnectionStringForType(
         try {
           const url = new URL(connectionUrl);
           url.searchParams.delete('channel_binding');
-          
+
           // Both sslmode=prefer and sslmode=require work with DuckDB
           // Keep existing sslmode if set, otherwise default to prefer
           const currentSslMode = url.searchParams.get('sslmode');
@@ -140,9 +134,9 @@ function getConnectionStringForType(
           if (currentSslMode === 'disable') {
             url.searchParams.set('sslmode', 'prefer');
           }
-          
+
           return url.toString();
-        } catch (urlError) {
+        } catch {
           // Fallback: simple string replacement if URL parsing fails
           // This handles edge cases where URL might not parse correctly
           let cleaned = connectionUrl;
@@ -287,4 +281,3 @@ export async function getSupportedProviders(): Promise<string[]> {
   // Sort for consistent error messages
   return Array.from(providers).sort();
 }
-

@@ -123,10 +123,10 @@ Available tools:
    - Shows the first N rows (default 50) with pagination info
    - If the user wants to see more rows or apply filters, use runQuery instead
 
-7. getSchema: Discover available data structures directly from DuckDB (views + attached databases). Supports both Google Sheets (via view registry) and foreign databases (PostgreSQL, MySQL, SQLite). If viewName is provided, returns schema for that specific view/table (accepts fully qualified paths like "ds_x.public.users" or simple view names). If not provided, returns schemas for everything discovered in DuckDB. This updates the business context automatically. Use this when the user asks which data sources are available, or when you need to remind the user which data sources are available.
+7. getSchema: Discover available data structures directly from DuckDB (views + attached databases). Supports both Google Sheets (via view registry) and foreign databases (PostgreSQL, MySQL, SQLite). If viewName is provided, returns schema for that specific view/table (accepts paths like "datasourcename.tablename" or "datasourcename.schema.tablename" for attached databases, or simple view names for DuckDB views). If not provided, returns schemas for everything discovered in DuckDB. This updates the business context automatically. Use this when the user asks which data sources are available, or when you need to remind the user which data sources are available.
    - Input: viewName: string (optional) - Name of the view/table to get schema for. Can be:
      * Simple view name (e.g., "customers") - for Google Sheets or DuckDB views
-     * Fully qualified path (e.g., "ds_x.public.users") - for attached foreign databases
+     * Datasource path (e.g., "datasourcename.tablename" or "datasourcename.schema.tablename") - for attached foreign databases
      * **If not provided, returns ALL available schemas from ALL datasources in ONE call**
    - **CRITICAL - Call Efficiency**: 
      * **Only call getSchema with a specific viewName** when you need schema for ONE specific view for a query
@@ -162,8 +162,8 @@ Available tools:
    - Input: query (SQL query string)
    - You can query:
      * Simple view names (e.g., "customers") - for Google Sheets or DuckDB views
-     * Fully qualified paths (e.g., "ds_x.public.users") - for attached foreign databases
-     * Join across multiple datasources: SELECT * FROM customers JOIN ds_x.public.users ON customers.id = ds_x.public.users.user_id
+     * Datasource paths (e.g., "datasourcename.tablename" or "datasourcename.schema.tablename") - for attached foreign databases
+     * Join across multiple datasources: SELECT * FROM customers JOIN datasourcename.users ON customers.id = datasourcename.users.user_id
    - Use listViews first to get the exact view names for Google Sheets, or getSchema to discover all available datasources
    - View names are case-sensitive and must match exactly (use semantic names from listViews)
    - **Federated Queries**: DuckDB enables querying across multiple datasources in a single query

@@ -265,7 +265,8 @@ export const readDataAgent = async (
 
               // For attached foreign databases, query their information_schema directly
               // For main database, query the default information_schema
-              const isAttachedDb = db.startsWith('ds_');
+              // Attached databases are any database that's not 'main' (the default DuckDB database)
+              const isAttachedDb = db !== 'main';
 
               let tableRows: Array<{
                 table_schema: string;
@@ -437,15 +438,29 @@ export const readDataAgent = async (
           } else {
             // All views - combine all schemas into one
             const allTables: SimpleTable[] = [];
-            for (const [schemaName, schemaData] of collectedSchemas.entries()) {
+            for (const [schemaKey, schemaData] of collectedSchemas.entries()) {
               // Add tables from each schema
               for (const table of schemaData.tables) {
+                // Format table name: for attached databases, show as datasourcename.tablename
+                // schemaKey format: "datasourcename.schema.tablename" or "tablename" for main
+                let formattedTableName = table.tableName;
+                if (schemaKey.includes('.')) {
+                  // This is an attached database table
+                  // schemaKey is like "mydatasource.public.companies"
+                  // Extract datasource name (first part) and table name (last part)
+                  const parts = schemaKey.split('.');
+                  if (parts.length >= 3) {
+                    // Format: datasourcename.tablename (skip schema)
+                    formattedTableName = `${parts[0]}.${parts[parts.length - 1]}`;
+                  } else if (parts.length === 2) {
+                    // Format: datasourcename.tablename
+                    formattedTableName = schemaKey;
+                  }
+                }
+
                 allTables.push({
                   ...table,
-                  // Optionally prefix table name with schema identifier for clarity
-                  tableName: schemaName.includes('.')
-                    ? table.tableName // Already qualified
-                    : table.tableName,
+                  tableName: formattedTableName,
                 });
               }
             }
@@ -539,7 +554,20 @@ export const readDataAgent = async (
           );
 
           // Include information about all discovered tables in the response
-          const allTableNames = Array.from(collectedSchemas.keys());
+          // Format table names: datasourcename.tablename for attached databases
+          const allTableNames = Array.from(collectedSchemas.keys()).map(
+            (key) => {
+              // Format: datasourcename.tablename (remove schema part)
+              if (key.includes('.')) {
+                const parts = key.split('.');
+                if (parts.length >= 3) {
+                  // "mydatasource.public.companies" -> "mydatasource.companies"
+                  return `${parts[0]}.${parts[parts.length - 1]}`;
+                }
+              }
+              return key;
+            },
+          );
           const tableCount = allTableNames.length;
 
           // Return schema and data insights (hide technical jargon)
@@ -565,7 +593,7 @@ export const readDataAgent = async (
       }),
       runQuery: tool({
         description:
-          'Run a SQL query against the DuckDB instance (views from file-based datasources or attached database tables). Query views by name (e.g., "customers") or attached tables by full path (e.g., ds_x.public.users). DuckDB enables federated queries across PostgreSQL, MySQL, Google Sheets, and other datasources.',
+          'Run a SQL query against the DuckDB instance (views from file-based datasources or attached database tables). Query views by name (e.g., "customers") or attached tables by datasource path (e.g., "datasourcename.tablename" or "datasourcename.schema.tablename"). DuckDB enables federated queries across PostgreSQL, MySQL, Google Sheets, and other datasources.',
         inputSchema: z.object({
           query: z.string(),
         }),

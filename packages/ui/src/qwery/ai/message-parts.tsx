@@ -29,8 +29,6 @@ import { SQLQueryVisualizer } from './sql-query-visualizer';
 
 import { SchemaVisualizer } from './schema-visualizer';
 
-import { AvailableSheetsVisualizer } from './sheets/available-sheets-visualizer';
-
 import { ViewSheetVisualizer } from './sheets/view-sheet-visualizer';
 
 import { ViewSheetError } from './sheets/view-sheet-error';
@@ -251,7 +249,7 @@ export function ToolPart({ part, messageId, index }: ToolPartProps) {
       );
     }
 
-    // Handle getSchema tool with SchemaVisualizer or AvailableSheetsVisualizer
+    // Handle getSchema tool with SchemaVisualizer
     if (part.type === 'tool-getSchema' && part.output) {
       const output = part.output as {
         schema?: {
@@ -266,31 +264,7 @@ export function ToolPart({ part, messageId, index }: ToolPartProps) {
         tableCount?: number;
       } | null;
 
-      // If allTables is present, this was called without viewName to list all sheets
-      if (output?.allTables && output.allTables.length > 0) {
-        // Map table names to sheet format
-        const mappedSheets = output.allTables.map((tableName) => {
-          // Determine type based on table name format
-          // Map attached_table to table for AvailableSheet type
-          const type: 'view' | 'table' = tableName.includes('.')
-            ? 'table'
-            : 'view';
-          return {
-            name: tableName,
-            type,
-          };
-        });
-        return (
-          <AvailableSheetsVisualizer
-            data={{
-              sheets: mappedSheets,
-              message: `Found ${output.tableCount ?? mappedSheets.length} sheet${(output.tableCount ?? mappedSheets.length) !== 1 ? 's' : ''}`,
-            }}
-          />
-        );
-      }
-
-      // Otherwise, show schema for specific view
+      // Always show schema if available - this is the primary purpose of getSchema
       if (output?.schema) {
         return <SchemaVisualizer schema={output.schema} />;
       }

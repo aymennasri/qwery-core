@@ -28,10 +28,10 @@ export const viewSheet = async (
   // Escape the sheet name for SQL
   const escapedSheetName = sheetName.replace(/"/g, '""');
 
-  // Build query - handle both simple names and fully qualified paths
+  // Build query - handle both simple names and datasource paths
   let query: string;
   if (sheetName.includes('.')) {
-    // Fully qualified path (e.g., ds_xxx.public.users)
+    // Datasource path (e.g., datasourcename.tablename or datasourcename.schema.tablename)
     query = `SELECT * FROM "${escapedSheetName}" LIMIT ${limit}`;
   } else {
     // Simple name (view in main database)

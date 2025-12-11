@@ -1,10 +1,8 @@
 import type { Datasource } from '@qwery/domain/entities';
 import type { SimpleSchema } from '@qwery/domain/entities';
 import type { DuckDBInstance } from '@duckdb/node-api';
-import {
-  getProviderMapping,
-  getSupportedProviders,
-} from './provider-registry';
+import { getProviderMapping, getSupportedProviders } from './provider-registry';
+import { getDatasourceDatabaseName } from './datasource-name-utils';
 
 // Connection type from DuckDB instance
 type Connection = Awaited<ReturnType<DuckDBInstance['connect']>>;
@@ -56,8 +54,8 @@ export async function attachForeignDatasourceToConnection(
     );
   }
 
-  // Generate a unique database name for this datasource attachment
-  const attachedDatabaseName = `ds_${datasource.id.replace(/-/g, '_')}`;
+  // Use datasource name directly as database name (sanitized)
+  const attachedDatabaseName = getDatasourceDatabaseName(datasource);
 
   // Install and load the appropriate extension if needed
   if (mapping.requiresExtension && mapping.extensionName) {
@@ -181,8 +179,8 @@ export async function attachForeignDatasource(
     );
   }
 
-  // Generate a unique database name for this datasource attachment
-  const attachedDatabaseName = `ds_${datasource.id.replace(/-/g, '_')}`;
+  // Use datasource name directly as database name (sanitized)
+  const attachedDatabaseName = getDatasourceDatabaseName(datasource);
 
   // Install and load the appropriate extension if needed
   if (mapping.requiresExtension && mapping.extensionName) {
