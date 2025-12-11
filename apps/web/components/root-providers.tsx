@@ -7,6 +7,7 @@ import { I18nProvider } from '@qwery/i18n/provider';
 import { ClientOnly } from '@qwery/ui/client-only';
 import { GlobalLoader } from '@qwery/ui/global-loader';
 import { Toaster } from '@qwery/ui/sonner';
+import { AgentStatusProvider } from '@qwery/ui/ai';
 
 import { i18nResolver } from '~/lib/i18n/i18n.resolver';
 import { getI18nSettings } from '~/lib/i18n/i18n.settings';
@@ -52,7 +53,9 @@ export function RootProviders(
               enableColorScheme={false}
             >
               <WorkspaceProvider>
-                <AgentsProvider>{props.children}</AgentsProvider>
+                <AgentStatusProvider>
+                  <AgentsProvider>{props.children}</AgentsProvider>
+                </AgentStatusProvider>
               </WorkspaceProvider>
             </ThemeProvider>
           </ReactQueryProvider>

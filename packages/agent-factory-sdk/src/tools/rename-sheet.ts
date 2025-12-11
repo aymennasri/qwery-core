@@ -1,5 +1,9 @@
+import { DuckDBInstanceManager } from './duckdb-instance-manager';
+import { renameView } from './view-registry';
+
 export interface RenameSheetOptions {
-  dbPath: string;
+  conversationId: string;
+  workspace: string;
   oldSheetName: string;
   newSheetName: string;
 }
@@ -10,71 +14,66 @@ export interface RenameSheetResult {
   message: string;
 }
 
-/**
- * Renames a sheet/view in the DuckDB database.
- * This is useful when you want to give a sheet a more meaningful name based on its content.
- * Uses shared instance manager for MVCC-optimized operations
- */
 export const renameSheet = async (
   opts: RenameSheetOptions,
 ): Promise<RenameSheetResult> => {
-  const { mkdir } = await import('node:fs/promises');
-  const { dirname } = await import('node:path');
-  const { DuckDBInstance } = await import('@duckdb/node-api');
+  const { conversationId, workspace, oldSheetName, newSheetName } = opts;
 
-  const dbDir = dirname(opts.dbPath);
-  await mkdir(dbDir, { recursive: true });
+  // Validate inputs
+  if (!oldSheetName || !newSheetName) {
+    throw new Error('Both oldSheetName and newSheetName are required');
+  }
 
-  const instance = await DuckDBInstance.create(opts.dbPath);
-  const conn = await instance.connect();
+  if (oldSheetName === newSheetName) {
+    throw new Error('Old and new sheet names cannot be the same');
+  }
+
+  const conn = await DuckDBInstanceManager.getConnection(
+    conversationId,
+    workspace,
+  );
 
   try {
-    // Sanitize names for SQL
-    const oldName = opts.oldSheetName.replace(/"/g, '""');
-    const newName = opts.newSheetName.replace(/"/g, '""');
+    const escapedOldName = oldSheetName.replace(/"/g, '""');
+    const escapedNewName = newSheetName.replace(/"/g, '""');
 
     // Check if old view exists
-    const checkQuery = `
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'main' AND table_name = '${oldName}'
-    `;
-    const checkResult = await conn.runAndReadAll(checkQuery);
-    await checkResult.readAll();
-    const rows = checkResult.getRowObjectsJS();
-
-    if (rows.length === 0) {
-      throw new Error(
-        `View "${opts.oldSheetName}" does not exist. Cannot rename.`,
-      );
+    try {
+      await conn.run(`SELECT 1 FROM "${escapedOldName}" LIMIT 1`);
+    } catch {
+      throw new Error(`View "${oldSheetName}" does not exist. Cannot rename.`);
     }
 
     // Check if new name already exists
-    const checkNewQuery = `
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'main' AND table_name = '${newName}'
-    `;
-    const checkNewResult = await conn.runAndReadAll(checkNewQuery);
-    await checkNewResult.readAll();
-    const newRows = checkNewResult.getRowObjectsJS();
-
-    if (newRows.length > 0) {
+    try {
+      await conn.run(`SELECT 1 FROM "${escapedNewName}" LIMIT 1`);
       throw new Error(
-        `View "${opts.newSheetName}" already exists. Cannot rename to an existing name.`,
+        `View "${newSheetName}" already exists. Cannot rename to an existing name.`,
       );
+    } catch (error) {
+      // If error is about table not found, that's good - name is available
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      if (
+        !errorMsg.includes('does not exist') &&
+        !errorMsg.includes('not found') &&
+        !errorMsg.includes('Catalog Error')
+      ) {
+        // Some other error occurred, rethrow
+        throw error;
+      }
     }
 
-    // Rename the view using ALTER VIEW
-    await conn.run(`ALTER VIEW "${oldName}" RENAME TO "${newName}"`);
+    // Rename the view using view-registry function (which updates viewRegistry)
+    const { join } = await import('node:path');
+    const dbPath = join(workspace, conversationId, 'database.db');
+    await renameView(dbPath, oldSheetName, newSheetName);
 
     return {
-      oldSheetName: opts.oldSheetName,
-      newSheetName: opts.newSheetName,
-      message: `Successfully renamed view "${opts.oldSheetName}" to "${opts.newSheetName}"`,
+      oldSheetName,
+      newSheetName,
+      message: `Successfully renamed view "${oldSheetName}" to "${newSheetName}"`,
     };
   } finally {
-    conn.closeSync();
-    instance.closeSync();
+    DuckDBInstanceManager.returnConnection(conversationId, workspace, conn);
   }
 };

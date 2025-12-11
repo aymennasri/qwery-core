@@ -132,18 +132,74 @@ export function calculateEntityConfidence(
 
 /**
  * Check if table name is a system or temp table
+ * Uses extension abstraction for system schema detection
+ * Synchronous version for backward compatibility
+ *
+ * Note: This uses inline system schema checks to avoid async imports
+ * in a synchronous function. The actual filtering in read-data-agent
+ * uses the async version from system-schema-filter.ts
  */
 export function isSystemOrTempTable(tableName: string): boolean {
   const name = tableName.toLowerCase();
+
+  // Handle fully qualified names (db.schema.table)
+  const parts = name.split('.');
+  if (parts.length >= 2) {
+    const schema = parts[parts.length - 2];
+    const table = parts[parts.length - 1];
+
+    if (!schema || !table) {
+      return false;
+    }
+
+    // Common system schemas across all providers
+    // This matches what's in system-schema-filter.ts
+    const commonSystemSchemas = new Set([
+      'pg_catalog',
+      'information_schema',
+      'pg_toast',
+      'pg_temp',
+      'pg_toast_temp',
+      'supabase_migrations',
+      'vault',
+      'storage',
+      'realtime',
+      'graphql',
+      'graphql_public',
+      'auth',
+      'extensions',
+      'pgbouncer',
+      'mysql',
+      'performance_schema',
+      'sys',
+      'system',
+      'sqlite_master',
+    ]);
+
+    if (commonSystemSchemas.has(schema)) {
+      return true;
+    }
+
+    // Check table name patterns (matches isSystemTableName from system-schema-filter)
+    if (
+      table.startsWith('pg_') ||
+      table.startsWith('sqlite_') ||
+      table.startsWith('duckdb_') ||
+      table.startsWith('_') ||
+      table.includes('_migrations') ||
+      table.includes('_secrets')
+    ) {
+      return true;
+    }
+  }
+
+  // Check simple table names (temp tables, etc.)
   return (
     name.startsWith('temp_') ||
     name.startsWith('pragma_') ||
     name === 'information_schema' ||
     name.includes('_temp') ||
     name.includes('_tmp') ||
-    name.startsWith('pg_') ||
-    name.startsWith('sqlite_') ||
-    name.startsWith('duckdb_') ||
     name.startsWith('main.') ||
     name.startsWith('temp.')
   );
@@ -477,7 +533,7 @@ export function inferDomain(schemas: SimpleSchema[]): {
         allColumns.push(name);
 
         // Extract patterns (words, stems)
-        const words = name.split(/[_\s-]/).filter((w: string) => w.length > 2);
+        const words = name.split(/[_\s-]/).filter((w) => w.length > 2);
         for (const word of words) {
           const count = columnPatterns.get(word) || 0;
           columnPatterns.set(word, count + 1);

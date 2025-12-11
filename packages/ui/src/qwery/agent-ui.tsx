@@ -34,36 +34,14 @@ import {
   ReasoningContent,
   ReasoningTrigger,
 } from '../ai-elements/reasoning';
-import {
-  Tool,
-  ToolHeader,
-  ToolContent,
-  ToolInput,
-  ToolOutput,
-} from '../ai-elements/tool';
+import { Tool, ToolHeader, ToolContent, ToolInput } from '../ai-elements/tool';
 import { Loader } from '../ai-elements/loader';
 import { ChatTransport, UIMessage, ToolUIPart } from 'ai';
-import { ChartRenderer, type ChartConfig } from './ai/charts/chart-renderer';
-import {
-  ChartTypeSelector,
-  type ChartTypeSelection,
-} from './ai/charts/chart-type-selector';
-import {
-  SQLQueryVisualizer,
-  type SQLQueryResult,
-} from './ai/sql-query-visualizer';
-import { SchemaVisualizer, type SchemaData } from './ai/schema-visualizer';
-import { AvailableSheetsVisualizer } from './ai/sheets/available-sheets-visualizer';
-import {
-  ViewSheetVisualizer,
-  type ViewSheetData,
-} from './ai/sheets/view-sheet-visualizer';
-import { ViewSheetError } from './ai/sheets/view-sheet-error';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
 import { BotAvatar } from './bot-avatar';
 import { Sparkles } from 'lucide-react';
-import { QweryPromptInput, type DatasourceItem } from './ai';
+import { QweryPromptInput, type DatasourceItem, ToolPart } from './ai';
 import { QweryContextProps } from './ai/context';
 
 export interface QweryAgentUIProps {
@@ -545,11 +523,6 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
                           default:
                             if (part.type.startsWith('tool-')) {
                               const toolPart = part as ToolUIPart;
-                              const toolName =
-                                'toolName' in toolPart &&
-                                typeof toolPart.toolName === 'string'
-                                  ? toolPart.toolName
-                                  : toolPart.type.replace('tool-', '');
                               const inProgressStates = new Set([
                                 'input-streaming',
                                 'input-available',
@@ -558,352 +531,44 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
                               const isToolInProgress = inProgressStates.has(
                                 toolPart.state as string,
                               );
-                              const isGenerateChart =
-                                toolPart.type === 'tool-generateChart';
-                              const isSelectChartType =
-                                toolPart.type === 'tool-selectChartType';
-                              const isRunQuery =
-                                toolPart.type === 'tool-runQuery';
-                              const isGetSchema =
-                                toolPart.type === 'tool-getTableSchema';
-                              const isListViews =
-                                toolPart.type === 'tool-listViews';
-                              const isViewSheet =
-                                toolPart.type === 'tool-viewSheet';
 
-                              // Check if viewSheet is already in progress or completed in this message
-                              const hasViewSheetInMessage = message.parts.some(
-                                (p) =>
-                                  p.type === 'tool-viewSheet' &&
-                                  (p.state === 'output-available' ||
-                                    p.state === 'input-available' ||
-                                    p.state === 'input-streaming'),
-                              );
-
-                              // Parse chart type selection if it's selectChartType tool
-                              let chartSelection: ChartTypeSelection | null =
-                                null;
-                              if (isSelectChartType && toolPart.output) {
-                                let parsedOutput: unknown = toolPart.output;
-                                if (typeof toolPart.output === 'string') {
-                                  try {
-                                    parsedOutput = JSON.parse(toolPart.output);
-                                  } catch {
-                                    // Not JSON, will use regular ToolOutput
-                                  }
-                                }
-                                if (
-                                  parsedOutput &&
-                                  typeof parsedOutput === 'object' &&
-                                  !Array.isArray(parsedOutput) &&
-                                  'chartType' in parsedOutput &&
-                                  'reasoning' in parsedOutput
-                                ) {
-                                  chartSelection =
-                                    parsedOutput as ChartTypeSelection;
-                                }
-                              }
-
-                              // Parse chart output if it's generateChart tool
-                              let chartConfig: ChartConfig | null = null;
-                              if (isGenerateChart && toolPart.output) {
-                                let parsedOutput: unknown = toolPart.output;
-                                if (typeof toolPart.output === 'string') {
-                                  try {
-                                    parsedOutput = JSON.parse(toolPart.output);
-                                  } catch {
-                                    // Not JSON, will use regular ToolOutput
-                                  }
-                                }
-                                if (
-                                  parsedOutput &&
-                                  typeof parsedOutput === 'object' &&
-                                  !Array.isArray(parsedOutput) &&
-                                  'chartType' in parsedOutput &&
-                                  'data' in parsedOutput &&
-                                  'config' in parsedOutput
-                                ) {
-                                  chartConfig = parsedOutput as ChartConfig;
-                                }
-                              }
-
-                              // Parse SQL query result if it's runQuery tool
-                              let sqlResult: SQLQueryResult | null = null;
-                              let sqlQuery: string | undefined;
-                              if (isRunQuery) {
-                                // Extract query from input
-                                if (
-                                  toolPart.input &&
-                                  typeof toolPart.input === 'object' &&
-                                  'query' in toolPart.input
-                                ) {
-                                  sqlQuery =
-                                    typeof toolPart.input.query === 'string'
-                                      ? toolPart.input.query
-                                      : undefined;
-                                }
-
-                                // Parse output
-                                if (toolPart.output) {
-                                  let parsedOutput: unknown = toolPart.output;
-                                  if (typeof toolPart.output === 'string') {
-                                    try {
-                                      parsedOutput = JSON.parse(
-                                        toolPart.output,
-                                      );
-                                    } catch {
-                                      // Not JSON, will use regular ToolOutput
-                                    }
-                                  }
-                                  if (
-                                    parsedOutput &&
-                                    typeof parsedOutput === 'object' &&
-                                    !Array.isArray(parsedOutput) &&
-                                    'result' in parsedOutput &&
-                                    parsedOutput.result &&
-                                    typeof parsedOutput.result === 'object' &&
-                                    'columns' in parsedOutput.result &&
-                                    'rows' in parsedOutput.result
-                                  ) {
-                                    sqlResult = parsedOutput as SQLQueryResult;
-                                  }
-                                }
-                              }
-
-                              // Parse schema output if it's getSchema tool
-                              let schemaData: SchemaData | null = null;
-                              if (isGetSchema && toolPart.output) {
-                                let parsedOutput: unknown = toolPart.output;
-                                if (typeof toolPart.output === 'string') {
-                                  try {
-                                    parsedOutput = JSON.parse(toolPart.output);
-                                  } catch {
-                                    // Not JSON, will use regular ToolOutput
-                                  }
-                                }
-                                if (
-                                  parsedOutput &&
-                                  typeof parsedOutput === 'object' &&
-                                  !Array.isArray(parsedOutput) &&
-                                  'schema' in parsedOutput &&
-                                  parsedOutput.schema &&
-                                  typeof parsedOutput.schema === 'object' &&
-                                  'tables' in parsedOutput.schema
-                                ) {
-                                  schemaData =
-                                    parsedOutput.schema as SchemaData;
-                                }
-                              }
-
-                              // Parse views if it's listViews tool
-                              let viewsData: {
-                                views: Array<{ viewName: string }>;
-                                message: string;
-                              } | null = null;
-                              if (isListViews && toolPart.output) {
-                                let parsedOutput: unknown = toolPart.output;
-                                if (typeof toolPart.output === 'string') {
-                                  try {
-                                    parsedOutput = JSON.parse(toolPart.output);
-                                  } catch {
-                                    // Not JSON, will use regular ToolOutput
-                                  }
-                                }
-                                if (
-                                  parsedOutput &&
-                                  typeof parsedOutput === 'object' &&
-                                  !Array.isArray(parsedOutput) &&
-                                  'views' in parsedOutput &&
-                                  Array.isArray(parsedOutput.views)
-                                ) {
-                                  viewsData = parsedOutput as {
-                                    views: Array<{ viewName: string }>;
-                                    message: string;
-                                  };
-                                }
-                              }
-
-                              // Parse view sheet if it's viewSheet tool
-                              let viewSheetData: ViewSheetData | null = null;
-                              if (isViewSheet && toolPart.output) {
-                                let parsedOutput: unknown = toolPart.output;
-                                if (typeof toolPart.output === 'string') {
-                                  try {
-                                    parsedOutput = JSON.parse(toolPart.output);
-                                  } catch {
-                                    // Not JSON, will use regular ToolOutput
-                                  }
-                                }
-                                if (
-                                  parsedOutput &&
-                                  typeof parsedOutput === 'object' &&
-                                  !Array.isArray(parsedOutput) &&
-                                  'sheetName' in parsedOutput &&
-                                  'columns' in parsedOutput &&
-                                  'rows' in parsedOutput
-                                ) {
-                                  viewSheetData = parsedOutput as ViewSheetData;
-                                }
-                              }
-
-                              return (
-                                <Tool
-                                  key={`${message.id}-${i}`}
-                                  defaultOpen={
-                                    toolPart.state === 'output-error' ||
-                                    (isGenerateChart &&
-                                      toolPart.state === 'output-available')
-                                  }
-                                >
-                                  <ToolHeader
-                                    title={toolName}
-                                    type={toolPart.type}
-                                    state={toolPart.state}
-                                  />
-                                  <ToolContent>
-                                    {toolPart.input != null &&
-                                    !isRunQuery &&
-                                    !isGetSchema &&
-                                    !isListViews &&
-                                    !isViewSheet ? (
-                                      <ToolInput input={toolPart.input} />
-                                    ) : null}
-                                    {isToolInProgress && (
+                              // Show loader while tool is in progress
+                              if (isToolInProgress) {
+                                return (
+                                  <Tool
+                                    key={`${message.id}-${i}`}
+                                    defaultOpen={false}
+                                  >
+                                    <ToolHeader
+                                      title={
+                                        'toolName' in toolPart &&
+                                        typeof toolPart.toolName === 'string'
+                                          ? toolPart.toolName
+                                          : toolPart.type.replace('tool-', '')
+                                      }
+                                      type={toolPart.type}
+                                      state={toolPart.state}
+                                    />
+                                    <ToolContent>
+                                      {toolPart.input != null ? (
+                                        <ToolInput input={toolPart.input} />
+                                      ) : null}
                                       <div className="flex items-center justify-center py-8">
                                         <Loader size={20} />
                                       </div>
-                                    )}
-                                    {isSelectChartType && chartSelection ? (
-                                      <div className="min-w-0 space-y-2 p-4">
-                                        <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                                          Chart Type Selection
-                                        </h4>
-                                        <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4">
-                                          <ChartTypeSelector
-                                            selection={chartSelection}
-                                          />
-                                        </div>
-                                      </div>
-                                    ) : isGenerateChart && chartConfig ? (
-                                      <div className="min-w-0 space-y-2 p-4">
-                                        <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                                          Chart
-                                        </h4>
-                                        <div className="bg-muted/50 w-full max-w-full min-w-0 overflow-hidden rounded-md p-4">
-                                          <ChartRenderer
-                                            chartConfig={chartConfig}
-                                          />
-                                        </div>
-                                      </div>
-                                    ) : isGetSchema && schemaData ? (
-                                      <div className="min-w-0 space-y-2 p-4">
-                                        <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                                          Schema
-                                        </h4>
-                                        <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4">
-                                          <SchemaVisualizer
-                                            schema={schemaData}
-                                          />
-                                        </div>
-                                      </div>
-                                    ) : isRunQuery && sqlResult ? (
-                                      <div className="min-w-0 space-y-2 p-4">
-                                        <SQLQueryVisualizer
-                                          query={sqlQuery}
-                                          result={sqlResult}
-                                        />
-                                      </div>
-                                    ) : isListViews && viewsData ? (
-                                      <div className="min-w-0 space-y-2 p-4">
-                                        <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                                          Available Sheets
-                                        </h4>
-                                        <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4">
-                                          <AvailableSheetsVisualizer
-                                            data={{
-                                              sheets: viewsData.views.map(
-                                                (v) => ({
-                                                  name: v.viewName,
-                                                  type: 'view' as const,
-                                                }),
-                                              ),
-                                              message: viewsData.message,
-                                            }}
-                                            isRequestInProgress={
-                                              status === 'streaming' ||
-                                              status === 'submitted' ||
-                                              hasViewSheetInMessage
-                                            }
-                                            onViewSheet={(sheetName) => {
-                                              sendMessage({
-                                                text: `View sheet "${sheetName}"`,
-                                              });
-                                            }}
-                                          />
-                                        </div>
-                                      </div>
-                                    ) : isViewSheet && viewSheetData ? (
-                                      <div
-                                        ref={(el) => {
-                                          if (el) {
-                                            viewSheetRefs.current.set(
-                                              `${message.id}-${i}`,
-                                              el,
-                                            );
-                                          } else {
-                                            viewSheetRefs.current.delete(
-                                              `${message.id}-${i}`,
-                                            );
-                                          }
-                                        }}
-                                        className="min-w-0 scroll-mt-4 space-y-2 p-4"
-                                      >
-                                        <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                                          Sheet View
-                                        </h4>
-                                        <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4">
-                                          <ViewSheetVisualizer
-                                            data={viewSheetData}
-                                          />
-                                        </div>
-                                      </div>
-                                    ) : isViewSheet && toolPart.errorText ? (
-                                      <div className="min-w-0 space-y-2 p-4">
-                                        <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                                          Sheet View
-                                        </h4>
-                                        <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4">
-                                          <ViewSheetError
-                                            errorText={toolPart.errorText}
-                                            sheetName={
-                                              toolPart.input &&
-                                              typeof toolPart.input ===
-                                                'object' &&
-                                              'sheetName' in toolPart.input &&
-                                              typeof toolPart.input
-                                                .sheetName === 'string'
-                                                ? toolPart.input.sheetName
-                                                : undefined
-                                            }
-                                            availableSheets={viewsData?.views.map(
-                                              (v) => v.viewName,
-                                            )}
-                                            onRetry={(sheetName: string) => {
-                                              sendMessage({
-                                                text: `View sheet "${sheetName}"`,
-                                              });
-                                            }}
-                                          />
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <ToolOutput
-                                        output={toolPart.output}
-                                        errorText={toolPart.errorText}
-                                      />
-                                    )}
-                                  </ToolContent>
-                                </Tool>
+                                    </ToolContent>
+                                  </Tool>
+                                );
+                              }
+
+                              // Use ToolPart component for completed tools (includes visualizers)
+                              return (
+                                <ToolPart
+                                  key={`${message.id}-${i}`}
+                                  part={toolPart}
+                                  messageId={message.id}
+                                  index={i}
+                                />
                               );
                             }
                             return null;

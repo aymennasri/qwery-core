@@ -1,76 +1,79 @@
 import { runQuery } from './run-query';
 
 export interface ViewSheetOptions {
-  dbPath: string;
-  sheetName?: string;
+  conversationId: string;
+  workspace: string;
+  sheetName: string;
   limit?: number;
-  datasourceIds?: string[];
-  datasourceRepository?: import('@qwery/domain/repositories').IDatasourceRepository;
 }
 
 export interface ViewSheetResult {
   sheetName: string;
-  totalRows: number;
-  displayedRows: number;
   columns: string[];
   rows: Array<Record<string, unknown>>;
-  message: string;
+  rowCount: number;
+  limit: number;
+  hasMore: boolean;
 }
 
-/**
- * Views/displays the contents of a sheet.
- * This is a convenient way to quickly see what data is in a sheet without writing a SQL query.
- * Shows the first N rows by default (default 50).
- */
 export const viewSheet = async (
   opts: ViewSheetOptions,
 ): Promise<ViewSheetResult> => {
-  if (!opts.sheetName) {
-    throw new Error(
-      'sheetName is required. Use listViews to see available views.',
-    );
+  const { conversationId, workspace, sheetName, limit = 50 } = opts;
+
+  if (!sheetName) {
+    throw new Error('sheetName is required');
   }
-  const sheetName = opts.sheetName;
-  const limit = opts.limit || 50;
 
-  // First, get the total row count
-  const countQuery = `SELECT COUNT(*) as total FROM "${sheetName}"`;
-  const countResult = await runQuery({
-    dbPath: opts.dbPath,
-    query: countQuery,
-    datasourceIds: opts.datasourceIds,
-    datasourceRepository: opts.datasourceRepository,
+  // Escape the sheet name for SQL
+  const escapedSheetName = sheetName.replace(/"/g, '""');
+
+  // Build query - handle both simple names and fully qualified paths
+  let query: string;
+  if (sheetName.includes('.')) {
+    // Fully qualified path (e.g., ds_xxx.public.users)
+    query = `SELECT * FROM "${escapedSheetName}" LIMIT ${limit}`;
+  } else {
+    // Simple name (view in main database)
+    query = `SELECT * FROM "${escapedSheetName}" LIMIT ${limit}`;
+  }
+
+  // Execute query using runQuery (which uses centralized manager)
+  const result = await runQuery({
+    conversationId,
+    workspace,
+    query,
   });
 
-  const firstRow = countResult.rows[0];
-  const totalRows =
-    countResult.rows.length > 0 &&
-    firstRow &&
-    typeof firstRow.total === 'number'
-      ? firstRow.total
-      : 0;
+  // Check if there are more rows (query with limit + 1)
+  let hasMore = false;
+  if (result.rows.length === limit) {
+    // There might be more rows
+    const countQuery = sheetName.includes('.')
+      ? `SELECT COUNT(*) as count FROM "${escapedSheetName}"`
+      : `SELECT COUNT(*) as count FROM "${escapedSheetName}"`;
 
-  // Then, get the first N rows
-  const viewQuery = `SELECT * FROM "${sheetName}" LIMIT ${limit}`;
-  const viewResult = await runQuery({
-    dbPath: opts.dbPath,
-    query: viewQuery,
-    datasourceIds: opts.datasourceIds,
-    datasourceRepository: opts.datasourceRepository,
-  });
-
-  const displayedRows = viewResult.rows.length;
-  const message =
-    totalRows > limit
-      ? `Showing first ${displayedRows} of ${totalRows} rows. Use runQuery to see more or apply filters.`
-      : `Showing all ${displayedRows} rows.`;
+    try {
+      const countResult = await runQuery({
+        conversationId,
+        workspace,
+        query: countQuery,
+      });
+      const totalCount =
+        (countResult.rows[0]?.['count'] as number) || result.rows.length;
+      hasMore = totalCount > limit;
+    } catch {
+      // If count query fails, assume there might be more
+      hasMore = result.rows.length === limit;
+    }
+  }
 
   return {
     sheetName,
-    totalRows,
-    displayedRows,
-    columns: viewResult.columns,
-    rows: viewResult.rows,
-    message,
+    columns: result.columns,
+    rows: result.rows,
+    rowCount: result.rows.length,
+    limit,
+    hasMore,
   };
 };

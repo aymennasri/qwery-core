@@ -351,7 +351,8 @@ export type Intent = z.infer<typeof IntentSchema>;
 
 export type AgentContext = {
   model: string;
-  conversationId: string;
+  conversationId: string; // UUID (for internal tracking)
+  conversationSlug: string; // Slug (for conversation lookups)
   inputMessage: string;
   response: string;
   previousMessages: UIMessage[]; // full UI messages history

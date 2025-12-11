@@ -13,6 +13,7 @@ import { createCachedActor } from './utils/actor-cache';
 
 export const createStateMachine = (
   conversationId: string,
+  conversationSlug: string,
   model: string,
   repositories: Repositories,
 ) => {
@@ -69,6 +70,7 @@ export const createStateMachine = (
       model: model,
       inputMessage: '',
       conversationId: conversationId,
+      conversationSlug: conversationSlug,
       response: '',
       previousMessages: [],
       streamResult: undefined,
@@ -311,7 +313,7 @@ export const createStateMachine = (
                       id: 'READ_DATA',
                       input: ({ context }: { context: AgentContext }) => {
                         return {
-                          conversationId: context.conversationId,
+                          conversationId: context.conversationSlug, // Use slug for conversation lookups
                           previousMessages: context.previousMessages,
                           model: context.model,
                           repositories: repositories,

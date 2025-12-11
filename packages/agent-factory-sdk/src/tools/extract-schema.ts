@@ -3,9 +3,13 @@ import type {
   SimpleTable,
   SimpleColumn,
 } from '@qwery/domain/entities';
+import type { DuckDBInstance } from '@duckdb/node-api';
+
+// Connection type from DuckDB instance
+type Connection = Awaited<ReturnType<DuckDBInstance['connect']>>;
 
 export interface ExtractSchemaOptions {
-  dbPath: string;
+  connection: Connection; // Changed from dbPath
   viewName?: string;
   allowTempTables?: boolean; // Allow temp tables during creation process
 }
@@ -13,40 +17,35 @@ export interface ExtractSchemaOptions {
 export const extractSchema = async (
   opts: ExtractSchemaOptions,
 ): Promise<SimpleSchema> => {
-  const { mkdir } = await import('node:fs/promises');
-  const { dirname } = await import('node:path');
+  const conn = opts.connection;
 
-  // Ensure directory exists
-  const dbDir = dirname(opts.dbPath);
-  await mkdir(dbDir, { recursive: true });
-
-  const { DuckDBInstance } = await import('@duckdb/node-api');
-  const instance = await DuckDBInstance.create(opts.dbPath);
-  const conn = await instance.connect();
-
-  // Import validation function
-  const { isSystemOrTempTable, validateTableExists } = await import(
-    './view-registry'
+  console.log(
+    `[ExtractSchema] Extracting schema${opts.viewName ? ` for view: ${opts.viewName}` : ' (all views)'}`,
   );
 
-  try {
-    // Validate view exists and is not temp if viewName is provided
-    // But allow temp tables during creation process (allowTempTables = true)
-    if (opts.viewName) {
-      if (!opts.allowTempTables && isSystemOrTempTable(opts.viewName)) {
-        throw new Error(
-          `Cannot extract schema from system/temp table: ${opts.viewName}`,
-        );
-      }
+  // Import validation function
+  const { isSystemOrTempTable } = await import('./view-registry');
 
-      const exists = await validateTableExists(opts.dbPath, opts.viewName);
-      if (!exists) {
-        throw new Error(`View '${opts.viewName}' does not exist in database`);
-      }
+  // Validate view exists and is not temp if viewName is provided
+  // But allow temp tables during creation process (allowTempTables = true)
+  if (opts.viewName) {
+    if (!opts.allowTempTables && isSystemOrTempTable(opts.viewName)) {
+      throw new Error(
+        `Cannot extract schema from system/temp table: ${opts.viewName}`,
+      );
     }
-    // If no viewName specified, get all views
-    if (!opts.viewName) {
-      const viewsReader = await conn.runAndReadAll(`
+
+    // Check if view exists by trying to describe it
+    try {
+      const escapedViewName = opts.viewName.replace(/"/g, '""');
+      await conn.run(`DESCRIBE "${escapedViewName}"`);
+    } catch {
+      throw new Error(`View '${opts.viewName}' does not exist in database`);
+    }
+  }
+  // If no viewName specified, get all views
+  if (!opts.viewName) {
+    const viewsReader = await conn.runAndReadAll(`
         SELECT table_name 
         FROM information_schema.views 
         WHERE table_schema = 'main'
@@ -55,103 +54,115 @@ export const extractSchema = async (
         AND table_name NOT LIKE '\\_%' ESCAPE '\\'
         ORDER BY table_name
       `);
-      await viewsReader.readAll();
-      const allViews = viewsReader.getRowObjectsJS() as Array<{
-        table_name: string;
-      }>;
-
-      // Import validation function
-      const { isSystemOrTempTable } = await import('./view-registry');
-
-      // Filter out known system views and temp tables - only return views that look like user-created views
-      const views = allViews.filter((v) => {
-        const name = v.table_name;
-        // Exclude system/temp tables
-        if (isSystemOrTempTable(name)) {
-          return false;
-        }
-        // Exclude views with dots (schema-qualified) or special characters
-        const nameLower = name.toLowerCase();
-        if (
-          nameLower.includes('.') ||
-          nameLower.includes('$') ||
-          nameLower.includes('#')
-        ) {
-          return false;
-        }
-        return true;
-      });
-
-      // If we still have too many views, try to identify user-created ones
-      // by checking if they match common naming patterns (e.g., sheet_*, my_*, etc.)
-      // For now, just return all filtered views and let the caller handle it
-
-      const tables: SimpleTable[] = [];
-      for (const view of views) {
-        const viewName = view.table_name.replace(/"/g, '""');
-        const schemaReader = await conn.runAndReadAll(`DESCRIBE "${viewName}"`);
-        await schemaReader.readAll();
-        const schemaRows = schemaReader.getRowObjectsJS() as Array<{
-          column_name: string;
-          column_type: string;
-        }>;
-
-        const columns: SimpleColumn[] = schemaRows.map((row) => ({
-          columnName: row.column_name,
-          columnType: row.column_type,
-        }));
-
-        tables.push({
-          tableName: view.table_name,
-          columns,
-        });
-      }
-
-      return {
-        databaseName: 'google_sheet',
-        schemaName: 'google_sheet',
-        tables,
-      };
-    }
-
-    // Get schema information using DESCRIBE on the specific view
-    const viewName = opts.viewName.replace(/"/g, '""');
-    const schemaReader = await conn.runAndReadAll(`DESCRIBE "${viewName}"`);
-    await schemaReader.readAll();
-    const schemaRows = schemaReader.getRowObjectsJS() as Array<{
-      column_name: string;
-      column_type: string;
+    await viewsReader.readAll();
+    const allViews = viewsReader.getRowObjectsJS() as Array<{
+      table_name: string;
     }>;
 
-    // Convert to SimpleSchema format
-    const columns: SimpleColumn[] = schemaRows.map((row) => ({
-      columnName: row.column_name,
-      columnType: row.column_type,
-    }));
+    // Import system schema filter utilities
+    const { getAllSystemSchemas, isSystemTableName } = await import(
+      './system-schema-filter'
+    );
+    const allSystemSchemas = getAllSystemSchemas();
+    const { isSystemOrTempTable } = await import('./view-registry');
 
-    const table: SimpleTable = {
-      tableName: opts.viewName,
-      columns,
-    };
+    // Filter out known system views and temp tables - only return views that look like user-created views
+    const views = allViews.filter((v) => {
+      const name = v.table_name;
 
-    const schema: SimpleSchema = {
+      // Exclude system/temp tables
+      if (isSystemOrTempTable(name)) {
+        return false; // NO LOGGING
+      }
+
+      // Exclude system tables using consistent filter
+      if (isSystemTableName(name)) {
+        return false; // NO LOGGING
+      }
+
+      // Exclude views with dots (schema-qualified) that are system schemas
+      const nameLower = name.toLowerCase();
+      if (nameLower.includes('.')) {
+        const parts = nameLower.split('.');
+        if (parts.length >= 2 && allSystemSchemas.has(parts[0] || '')) {
+          return false; // NO LOGGING
+        }
+      }
+
+      // Exclude special characters
+      if (nameLower.includes('$') || nameLower.includes('#')) {
+        return false; // NO LOGGING
+      }
+
+      return true;
+    });
+
+    // If we still have too many views, try to identify user-created ones
+    // by checking if they match common naming patterns (e.g., sheet_*, my_*, etc.)
+    // For now, just return all filtered views and let the caller handle it
+
+    const tables: SimpleTable[] = [];
+    for (const view of views) {
+      const viewName = view.table_name.replace(/"/g, '""');
+      const schemaReader = await conn.runAndReadAll(`DESCRIBE "${viewName}"`);
+      await schemaReader.readAll();
+      const schemaRows = schemaReader.getRowObjectsJS() as Array<{
+        column_name: string;
+        column_type: string;
+      }>;
+
+      const columns: SimpleColumn[] = schemaRows.map((row) => ({
+        columnName: row.column_name,
+        columnType: row.column_type,
+      }));
+
+      tables.push({
+        tableName: view.table_name,
+        columns,
+      });
+    }
+
+    return {
       databaseName: 'google_sheet',
       schemaName: 'google_sheet',
-      tables: [table],
+      tables,
     };
-
-    return schema;
-  } finally {
-    conn.closeSync();
-    instance.closeSync();
   }
+
+  // Get schema information using DESCRIBE on the specific view
+  const viewName = opts.viewName.replace(/"/g, '""');
+  const schemaReader = await conn.runAndReadAll(`DESCRIBE "${viewName}"`);
+  await schemaReader.readAll();
+  const schemaRows = schemaReader.getRowObjectsJS() as Array<{
+    column_name: string;
+    column_type: string;
+  }>;
+
+  // Convert to SimpleSchema format
+  const columns: SimpleColumn[] = schemaRows.map((row) => ({
+    columnName: row.column_name,
+    columnType: row.column_type,
+  }));
+
+  const table: SimpleTable = {
+    tableName: opts.viewName,
+    columns,
+  };
+
+  const schema: SimpleSchema = {
+    databaseName: 'google_sheet',
+    schemaName: 'google_sheet',
+    tables: [table],
+  };
+
+  return schema;
 };
 
 /**
  * Extract schemas for multiple views in parallel
  */
 export async function extractSchemasParallel(
-  dbPath: string,
+  connection: Connection,
   viewNames: string[],
   concurrency: number = 4,
 ): Promise<Map<string, SimpleSchema>> {
@@ -188,7 +199,7 @@ export async function extractSchemasParallel(
   const schemas = await processWithConcurrency(
     viewNames,
     async (viewName) => {
-      const schema = await extractSchema({ dbPath, viewName });
+      const schema = await extractSchema({ connection, viewName });
       return [viewName, schema] as [string, SimpleSchema];
     },
     concurrency,

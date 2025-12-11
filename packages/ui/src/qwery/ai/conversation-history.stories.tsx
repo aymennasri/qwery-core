@@ -1,4 +1,3 @@
-import { useState, useMemo } from 'react';
 import * as React from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { ConversationHistory, type Conversation } from './conversation-history';
@@ -128,7 +127,7 @@ const generateMockConversations = (): Conversation[] => {
 };
 
 const DefaultComponent = () => {
-  const [currentConversationId, setCurrentConversationId] = useState<
+  const [currentConversationId, setCurrentConversationId] = React.useState<
     string | undefined
   >('1');
   const conversations = generateMockConversations();
@@ -146,11 +145,14 @@ const DefaultComponent = () => {
           console.log('New conversation clicked');
           setCurrentConversationId(undefined);
         }}
-        onConversationEdit={(id) => {
-          console.log('Edit conversation:', id);
+        onConversationEdit={(id, newTitle) => {
+          console.log('Edit conversation:', id, newTitle);
         }}
         onConversationDelete={(id) => {
           console.log('Delete conversation:', id);
+        }}
+        onConversationsDelete={(ids) => {
+          console.log('Delete conversations:', ids);
         }}
       />
     </div>
@@ -173,8 +175,13 @@ export const NoCurrentConversation: Story = {
             console.log('Selected conversation:', id)
           }
           onNewConversation={() => console.log('New conversation clicked')}
-          onConversationEdit={(id) => console.log('Edit conversation:', id)}
+          onConversationEdit={(id, newTitle) =>
+            console.log('Edit conversation:', id, newTitle)
+          }
           onConversationDelete={(id) => console.log('Delete conversation:', id)}
+          onConversationsDelete={(ids) =>
+            console.log('Delete conversations:', ids)
+          }
         />
       </div>
     );
@@ -198,22 +205,23 @@ export const Empty: Story = {
 };
 
 const WithManyConversationsComponent = () => {
-  const [currentConversationId, setCurrentConversationId] = useState<
+  const [currentConversationId, setCurrentConversationId] = React.useState<
     string | undefined
   >('1');
-  const conversations = useMemo(() => {
+  const conversations = React.useMemo(() => {
     const baseConversations = generateMockConversations();
     const additionalConversations: Conversation[] = [];
     const now = new Date();
 
     // Add more conversations for different time periods
     for (let i = 0; i < 20; i++) {
+      const date = new Date(now.getTime() - (i + 3) * 24 * 60 * 60 * 1000);
       additionalConversations.push({
         id: `extra-${i}`,
         slug: `sulg-${i}`,
         title: `Additional conversation ${i + 1}`,
-        createdAt: new Date(now.getTime() - (i + 3) * 24 * 60 * 60 * 1000),
-        updatedAt: new Date(now.getTime() - (i + 3) * 24 * 60 * 60 * 1000),
+        createdAt: date,
+        updatedAt: date,
       });
     }
 

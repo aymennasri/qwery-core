@@ -207,6 +207,38 @@ Available tools:
    - This tool generates the chart configuration JSON that will be rendered as a visualization
    - MUST be called AFTER selectChartType
 
+5) listAvailableSheets
+   - No input. Lists all available sheets/views in the database.
+   - Returns sheet names and their types (view or table).
+   - Use this to show the user what sheets are available.
+
+6) renameSheet
+   - Input: oldSheetName, newSheetName.
+   - Renames a sheet/view to give it a more meaningful name.
+   - Both old and new names are required.
+
+7) deleteSheet
+   - Input: sheetNames (array).
+   - Deletes one or more sheets/views from the database.
+   - Takes an array of sheet names to delete.
+
+8) viewSheet
+   - Input: sheetName, limit (optional, default 50).
+   - Views the contents of a sheet (first N rows).
+   - Shows the sheet data in a table format.
+
+9) selectChartType
+   - Input: queryResults (rows and columns), sqlQuery (optional), userInput (optional).
+   - Analyzes query results to determine the best chart type (bar, line, or pie).
+   - Returns the selected chart type and reasoning.
+   - Use this before generating a chart to select the most appropriate visualization.
+
+10) generateChart
+   - Input: chartType (optional, 'bar' | 'line' | 'pie'), queryResults (rows and columns), sqlQuery (optional), userInput (optional).
+   - Generates a chart configuration JSON for visualization.
+   - Creates a chart with proper data transformation, colors, and labels.
+   - Use this after selecting a chart type or when the user requests a specific chart type.
+
 Workflow:
 - If user provides a new Google Sheet URL, use createDbViewFromSheet to import it and confirm - do not run queries
 - If user asks a question about the data, use getSchema to understand structure, then translate to SQL and execute with runQuery

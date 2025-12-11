@@ -5,16 +5,16 @@ import { tmpdir } from 'node:os';
 
 describe('runQuery', () => {
   let testWorkspace: string;
-  let dbPath: string;
+  const conversationId = 'test-conversation';
 
   beforeEach(async () => {
     testWorkspace = join(
       tmpdir(),
       `test-workspace-${Date.now()}-${Math.random().toString(36).substring(7)}`,
     );
-    dbPath = join(testWorkspace, 'test-conversation', 'database.db');
+    const dbPath = join(testWorkspace, conversationId, 'database.db');
 
-    mkdirSync(join(testWorkspace, 'test-conversation'), { recursive: true });
+    mkdirSync(join(testWorkspace, conversationId), { recursive: true });
 
     // Create DuckDB instance and view with test data
     const { DuckDBInstance } = await import('@duckdb/node-api');
@@ -47,14 +47,25 @@ describe('runQuery', () => {
     }
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Clean up instance manager
+    const { DuckDBInstanceManager } = await import(
+      '../../src/tools/duckdb-instance-manager'
+    );
+    try {
+      await DuckDBInstanceManager.closeInstance(conversationId, testWorkspace);
+    } catch {
+      // Ignore cleanup errors
+    }
+
     // Clean up test database files
     try {
+      const dbPath = join(testWorkspace, conversationId, 'database.db');
       if (existsSync(dbPath)) {
         unlinkSync(dbPath);
       }
       try {
-        rmdirSync(join(testWorkspace, 'test-conversation'));
+        rmdirSync(join(testWorkspace, conversationId));
         rmdirSync(testWorkspace);
       } catch {
         // Ignore errors
@@ -67,7 +78,8 @@ describe('runQuery', () => {
   it('should execute SELECT query and return results', async () => {
     const { runQuery } = await import('../../src/tools/run-query');
     const result = await runQuery({
-      dbPath,
+      conversationId,
+      workspace: testWorkspace,
       query: 'SELECT * FROM my_sheet LIMIT 2',
     });
 
@@ -84,7 +96,8 @@ describe('runQuery', () => {
   it('should execute filtered query', async () => {
     const { runQuery } = await import('../../src/tools/run-query');
     const result = await runQuery({
-      dbPath,
+      conversationId,
+      workspace: testWorkspace,
       query: 'SELECT * FROM my_sheet WHERE age > 30',
     });
 
@@ -98,7 +111,8 @@ describe('runQuery', () => {
   it('should execute aggregation query', async () => {
     const { runQuery } = await import('../../src/tools/run-query');
     const result = await runQuery({
-      dbPath,
+      conversationId,
+      workspace: testWorkspace,
       query: 'SELECT COUNT(*) as total FROM my_sheet',
     });
 
@@ -111,7 +125,8 @@ describe('runQuery', () => {
   it('should return empty results for query with no matches', async () => {
     const { runQuery } = await import('../../src/tools/run-query');
     const result = await runQuery({
-      dbPath,
+      conversationId,
+      workspace: testWorkspace,
       query: 'SELECT * FROM my_sheet WHERE age > 100',
     });
 
@@ -123,7 +138,8 @@ describe('runQuery', () => {
   it('should handle SELECT with specific columns', async () => {
     const { runQuery } = await import('../../src/tools/run-query');
     const result = await runQuery({
-      dbPath,
+      conversationId,
+      workspace: testWorkspace,
       query: 'SELECT name, city FROM my_sheet',
     });
 
@@ -141,7 +157,8 @@ describe('runQuery', () => {
     const { runQuery } = await import('../../src/tools/run-query');
     await expect(
       runQuery({
-        dbPath: join(testWorkspace, 'non-existent', 'database.db'),
+        conversationId: 'non-existent',
+        workspace: testWorkspace,
         query: 'SELECT * FROM my_sheet',
       }),
     ).rejects.toThrow();
@@ -151,7 +168,8 @@ describe('runQuery', () => {
     const { runQuery } = await import('../../src/tools/run-query');
     await expect(
       runQuery({
-        dbPath,
+        conversationId,
+        workspace: testWorkspace,
         query: 'INVALID SQL QUERY',
       }),
     ).rejects.toThrow();
@@ -159,6 +177,7 @@ describe('runQuery', () => {
 
   it('should convert BigInt values to numbers/strings for JSON serialization', async () => {
     // Create a table with BIGINT values
+    const dbPath = join(testWorkspace, conversationId, 'database.db');
     const { DuckDBInstance } = await import('@duckdb/node-api');
     const instance = await DuckDBInstance.create(dbPath);
     const conn = await instance.connect();
@@ -184,7 +203,8 @@ describe('runQuery', () => {
 
     const { runQuery } = await import('../../src/tools/run-query');
     const result = await runQuery({
-      dbPath,
+      conversationId,
+      workspace: testWorkspace,
       query: 'SELECT * FROM bigint_test',
     });
 

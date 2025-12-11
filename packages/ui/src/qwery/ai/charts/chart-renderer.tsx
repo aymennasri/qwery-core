@@ -1,14 +1,35 @@
 'use client';
 
-import { useRef, useState, useMemo, useEffect, useCallback } from 'react';
+import {
+  useRef,
+  useState,
+  useMemo,
+  useEffect,
+  useCallback,
+  lazy,
+  Suspense,
+} from 'react';
 import * as React from 'react';
-import { BarChart } from './bar-chart';
-import { LineChart } from './line-chart';
-import { PieChart } from './pie-chart';
 
-import { ChartWrapper } from './chart-wrapper';
-import { ChartColorEditor } from './chart-color-editor';
-import { ChartType } from './chart-type-selector';
+// Dynamic imports to prevent infinite renders
+const BarChart = lazy(() =>
+  import('./bar-chart').then((m) => ({ default: m.BarChart })),
+);
+const LineChart = lazy(() =>
+  import('./line-chart').then((m) => ({ default: m.LineChart })),
+);
+const PieChart = lazy(() =>
+  import('./pie-chart').then((m) => ({ default: m.PieChart })),
+);
+const ChartWrapper = lazy(() =>
+  import('./chart-wrapper').then((m) => ({ default: m.ChartWrapper })),
+);
+const ChartColorEditor = lazy(() =>
+  import('./chart-color-editor').then((m) => ({ default: m.ChartColorEditor })),
+);
+
+// Import type only (no runtime import)
+import type { ChartType } from './chart-type-selector';
 
 export interface ChartConfig {
   chartType: ChartType;
@@ -161,54 +182,60 @@ export function ChartRenderer({ chartConfig }: ChartRendererProps) {
     switch (chartType) {
       case 'bar':
         return (
-          <BarChart
-            chartConfig={
-              modifiedChartConfig as {
-                chartType: 'bar';
-                data: Array<Record<string, unknown>>;
-                config: {
-                  colors: string[];
-                  labels?: Record<string, string>;
-                  xKey?: string;
-                  yKey?: string;
-                };
+          <Suspense fallback={<div className="p-4">Loading chart...</div>}>
+            <BarChart
+              chartConfig={
+                modifiedChartConfig as {
+                  chartType: 'bar';
+                  data: Array<Record<string, unknown>>;
+                  config: {
+                    colors: string[];
+                    labels?: Record<string, string>;
+                    xKey?: string;
+                    yKey?: string;
+                  };
+                }
               }
-            }
-          />
+            />
+          </Suspense>
         );
       case 'line':
         return (
-          <LineChart
-            chartConfig={
-              modifiedChartConfig as {
-                chartType: 'line';
-                data: Array<Record<string, unknown>>;
-                config: {
-                  colors: string[];
-                  labels?: Record<string, string>;
-                  xKey?: string;
-                  yKey?: string;
-                };
+          <Suspense fallback={<div className="p-4">Loading chart...</div>}>
+            <LineChart
+              chartConfig={
+                modifiedChartConfig as {
+                  chartType: 'line';
+                  data: Array<Record<string, unknown>>;
+                  config: {
+                    colors: string[];
+                    labels?: Record<string, string>;
+                    xKey?: string;
+                    yKey?: string;
+                  };
+                }
               }
-            }
-          />
+            />
+          </Suspense>
         );
       case 'pie':
         return (
-          <PieChart
-            chartConfig={
-              modifiedChartConfig as {
-                chartType: 'pie';
-                data: Array<Record<string, unknown>>;
-                config: {
-                  colors: string[];
-                  labels?: Record<string, string>;
-                  nameKey?: string;
-                  valueKey?: string;
-                };
+          <Suspense fallback={<div className="p-4">Loading chart...</div>}>
+            <PieChart
+              chartConfig={
+                modifiedChartConfig as {
+                  chartType: 'pie';
+                  data: Array<Record<string, unknown>>;
+                  config: {
+                    colors: string[];
+                    labels?: Record<string, string>;
+                    nameKey?: string;
+                    valueKey?: string;
+                  };
+                }
               }
-            }
-          />
+            />
+          </Suspense>
         );
       default:
         return (
@@ -221,20 +248,24 @@ export function ChartRenderer({ chartConfig }: ChartRendererProps) {
 
   return (
     <div className="space-y-4">
-      <ChartWrapper
-        title={title}
-        chartRef={chartRef as React.RefObject<HTMLDivElement>}
-        hideAxisLabelsCheckbox={chartType === 'pie'}
-        chartData={chartConfig.data}
-      >
-        {chartComponent}
-      </ChartWrapper>
+      <Suspense fallback={<div className="p-4">Loading chart wrapper...</div>}>
+        <ChartWrapper
+          title={title}
+          chartRef={chartRef as React.RefObject<HTMLDivElement>}
+          hideAxisLabelsCheckbox={chartType === 'pie'}
+          chartData={chartConfig.data}
+        >
+          {chartComponent}
+        </ChartWrapper>
+      </Suspense>
       <div className="flex justify-end">
-        <ChartColorEditor
-          colors={trimmedCustomColors}
-          onChange={setCustomColors}
-          maxColors={requiredColorCount}
-        />
+        <Suspense fallback={<div className="p-2">Loading color editor...</div>}>
+          <ChartColorEditor
+            colors={trimmedCustomColors}
+            onChange={setCustomColors}
+            maxColors={requiredColorCount}
+          />
+        </Suspense>
       </div>
     </div>
   );

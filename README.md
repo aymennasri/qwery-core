@@ -80,6 +80,52 @@ The web app will be available at `http://localhost:3000`
 pnpm desktop:dev
 ```
 
+## 🛠️ Development
+
+### Monorepo Structure
+
+This is a Turborepo monorepo with the following structure:
+
+- `apps/web` - Main React Router SaaS application
+- `apps/cli` - Command-line interface
+- `apps/desktop` - Desktop application (Electron)
+- `apps/e2e` - Playwright end-to-end tests
+- `packages/features/*` - Feature packages
+- `packages/` - Shared packages and utilities
+- `tooling/` - Build tools and development scripts
+
+### Development Commands
+
+```bash
+# Start all apps in development mode
+pnpm dev
+
+# Start specific app
+pnpm --filter web dev        # Web app (port 3000)
+pnpm --filter desktop dev    # Desktop app
+
+# Code Quality
+pnpm format:fix              # Auto-fix formatting
+pnpm lint:fix                # Auto-fix linting issues
+pnpm typecheck               # Type checking
+pnpm check                   # Run all quality checks (format, lint, typecheck, build, test)
+
+# Build
+pnpm build                   # Build all packages
+
+# Testing
+pnpm test                    # Run all tests
+```
+
+### Code Quality Standards
+
+- **TypeScript**: Strict type checking, avoid `any` types
+- **Linting**: ESLint with strict rules
+- **Formatting**: Prettier with consistent style
+- **Testing**: Vitest for unit tests, Playwright for E2E
+
+Always run `pnpm check` before committing to ensure all quality checks pass.
+
 ## 📚 Documentation
 
 - [Contributing Guide](CONTRIBUTING.md)
@@ -91,8 +137,18 @@ pnpm desktop:dev
 
 We welcome contributions! Check out our [Contributing Guide](CONTRIBUTING.md) to get started.
 
+### Before Submitting
+
+1. Run `pnpm check` to ensure all quality checks pass
+2. Make sure your code follows our [TypeScript guidelines](AGENTS.md#typescript)
+3. Write tests for new features
+4. Update documentation as needed
+
+### Resources
+
 - Review [good first issues](https://github.com/Guepard-Corp/qwery-core/issues?q=is%3Aopen+is%3Aissue+label%3A%22good%20first%20issue%22)
 - Read our [Code of Conduct](CODE_OF_CONDUCT.md)
+- Check [AGENTS.md](AGENTS.md) for development guidelines
 - Join our [Discord community](https://discord.gg/nCXAsUd3hm)
 
 ## 💬 Join Qwery Community

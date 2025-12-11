@@ -5,17 +5,17 @@ import { tmpdir } from 'node:os';
 
 describe('extractSchema', () => {
   let testWorkspace: string;
-  let dbPath: string;
+  const conversationId = 'test-conversation';
 
   beforeEach(async () => {
     testWorkspace = join(
       tmpdir(),
       `test-workspace-${Date.now()}-${Math.random().toString(36).substring(7)}`,
     );
-    dbPath = join(testWorkspace, 'test-conversation', 'database.db');
+    const dbPath = join(testWorkspace, conversationId, 'database.db');
 
     // Create test database with a view
-    mkdirSync(join(testWorkspace, 'test-conversation'), { recursive: true });
+    mkdirSync(join(testWorkspace, conversationId), { recursive: true });
 
     // Create DuckDB instance and view with test data
     const { DuckDBInstance } = await import('@duckdb/node-api');
@@ -47,14 +47,25 @@ describe('extractSchema', () => {
     }
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Clean up instance manager
+    const { DuckDBInstanceManager } = await import(
+      '../../src/tools/duckdb-instance-manager'
+    );
+    try {
+      await DuckDBInstanceManager.closeInstance(conversationId, testWorkspace);
+    } catch {
+      // Ignore cleanup errors
+    }
+
     // Clean up test database files
     try {
+      const dbPath = join(testWorkspace, conversationId, 'database.db');
       if (existsSync(dbPath)) {
         unlinkSync(dbPath);
       }
       try {
-        rmdirSync(join(testWorkspace, 'test-conversation'));
+        rmdirSync(join(testWorkspace, conversationId));
         rmdirSync(testWorkspace);
       } catch {
         // Ignore errors
@@ -66,64 +77,93 @@ describe('extractSchema', () => {
 
   it('should extract schema from DuckDB view', async () => {
     const { extractSchema } = await import('../../src/tools/extract-schema');
-    const schema = await extractSchema({
-      dbPath,
-    });
-
-    expect(schema).toBeDefined();
-    expect(schema.databaseName).toBe('google_sheet');
-    expect(schema.schemaName).toBe('google_sheet');
-    // Filter to only user-created views (exclude system views)
-    const userViews = schema.tables.filter(
-      (t) =>
-        t.tableName === 'my_sheet' ||
-        t.tableName.startsWith('sheet_') ||
-        t.tableName.startsWith('my_'),
+    const { DuckDBInstanceManager } = await import(
+      '../../src/tools/duckdb-instance-manager'
     );
-    expect(userViews.length).toBeGreaterThanOrEqual(1);
-    const mySheet = schema.tables.find((t) => t.tableName === 'my_sheet');
-    expect(mySheet).toBeDefined();
-    expect(mySheet!.columns).toHaveLength(4);
-
-    // Verify column structure
-    const columns = schema.tables[0].columns;
-    expect(
-      columns.find((c: { columnName: string }) => c.columnName === 'id'),
-    ).toBeDefined();
-    expect(
-      columns.find((c: { columnName: string }) => c.columnName === 'name'),
-    ).toBeDefined();
-    expect(
-      columns.find((c: { columnName: string }) => c.columnName === 'age'),
-    ).toBeDefined();
-    expect(
-      columns.find((c: { columnName: string }) => c.columnName === 'city'),
-    ).toBeDefined();
-
-    // Verify column types
-    const idColumn = columns.find(
-      (c: { columnName: string }) => c.columnName === 'id',
+    const conn = await DuckDBInstanceManager.getConnection(
+      conversationId,
+      testWorkspace,
     );
-    expect(idColumn?.columnType).toBeDefined();
+    try {
+      const schema = await extractSchema({
+        connection: conn,
+      });
+
+      expect(schema).toBeDefined();
+      expect(schema.databaseName).toBe('google_sheet');
+      expect(schema.schemaName).toBe('google_sheet');
+      // Filter to only user-created views (exclude system views)
+      const userViews = schema.tables.filter(
+        (t) =>
+          t.tableName === 'my_sheet' ||
+          t.tableName.startsWith('sheet_') ||
+          t.tableName.startsWith('my_'),
+      );
+      expect(userViews.length).toBeGreaterThanOrEqual(1);
+      const mySheet = schema.tables.find((t) => t.tableName === 'my_sheet');
+      expect(mySheet).toBeDefined();
+      expect(mySheet!.columns).toHaveLength(4);
+
+      // Verify column structure
+      const columns = schema.tables[0].columns;
+      expect(
+        columns.find((c: { columnName: string }) => c.columnName === 'id'),
+      ).toBeDefined();
+      expect(
+        columns.find((c: { columnName: string }) => c.columnName === 'name'),
+      ).toBeDefined();
+      expect(
+        columns.find((c: { columnName: string }) => c.columnName === 'age'),
+      ).toBeDefined();
+      expect(
+        columns.find((c: { columnName: string }) => c.columnName === 'city'),
+      ).toBeDefined();
+
+      // Verify column types
+      const idColumn = columns.find(
+        (c: { columnName: string }) => c.columnName === 'id',
+      );
+      expect(idColumn?.columnType).toBeDefined();
+    } finally {
+      DuckDBInstanceManager.returnConnection(
+        conversationId,
+        testWorkspace,
+        conn,
+      );
+    }
   });
 
   it('should create database and return empty schema when database does not exist', async () => {
     const { extractSchema } = await import('../../src/tools/extract-schema');
-    const result = await extractSchema({
-      dbPath: join(testWorkspace, 'non-existent', 'database.db'),
-    });
-    expect(result).toBeDefined();
-    expect(result.tables).toEqual([]);
+    const { DuckDBInstanceManager } = await import(
+      '../../src/tools/duckdb-instance-manager'
+    );
+    const nonExistentId = 'non-existent';
+    const conn = await DuckDBInstanceManager.getConnection(
+      nonExistentId,
+      testWorkspace,
+    );
+    try {
+      const result = await extractSchema({
+        connection: conn,
+      });
+      expect(result).toBeDefined();
+      expect(result.tables).toEqual([]);
+    } finally {
+      DuckDBInstanceManager.returnConnection(
+        nonExistentId,
+        testWorkspace,
+        conn,
+      );
+      await DuckDBInstanceManager.closeInstance(nonExistentId, testWorkspace);
+    }
   });
 
   it('should handle empty view gracefully', async () => {
     // Create a new database with an empty view
-    const emptyDbPath = join(
-      testWorkspace,
-      'empty-conversation',
-      'database.db',
-    );
-    mkdirSync(join(testWorkspace, 'empty-conversation'), { recursive: true });
+    const emptyConversationId = 'empty-conversation';
+    const emptyDbPath = join(testWorkspace, emptyConversationId, 'database.db');
+    mkdirSync(join(testWorkspace, emptyConversationId), { recursive: true });
 
     const { DuckDBInstance } = await import('@duckdb/node-api');
     const instance = await DuckDBInstance.create(emptyDbPath);
@@ -137,17 +177,36 @@ describe('extractSchema', () => {
     }
 
     const { extractSchema } = await import('../../src/tools/extract-schema');
-    const schema = await extractSchema({
-      dbPath: emptyDbPath,
-    });
+    const { DuckDBInstanceManager } = await import(
+      '../../src/tools/duckdb-instance-manager'
+    );
+    const extractConn = await DuckDBInstanceManager.getConnection(
+      emptyConversationId,
+      testWorkspace,
+    );
+    try {
+      const schema = await extractSchema({
+        connection: extractConn,
+      });
 
-    expect(schema).toBeDefined();
-    expect(schema.tables[0].columns).toHaveLength(1);
+      expect(schema).toBeDefined();
+      expect(schema.tables[0].columns).toHaveLength(1);
+    } finally {
+      DuckDBInstanceManager.returnConnection(
+        emptyConversationId,
+        testWorkspace,
+        extractConn,
+      );
+      await DuckDBInstanceManager.closeInstance(
+        emptyConversationId,
+        testWorkspace,
+      );
+    }
 
     // Cleanup
     try {
       unlinkSync(emptyDbPath);
-      rmdirSync(join(testWorkspace, 'empty-conversation'));
+      rmdirSync(join(testWorkspace, emptyConversationId));
     } catch {
       // Ignore cleanup errors
     }
@@ -155,19 +214,35 @@ describe('extractSchema', () => {
 
   it('should extract schema from specific view when viewName is provided', async () => {
     const { extractSchema } = await import('../../src/tools/extract-schema');
-    const schema = await extractSchema({
-      dbPath,
-      viewName: 'my_sheet',
-    });
+    const { DuckDBInstanceManager } = await import(
+      '../../src/tools/duckdb-instance-manager'
+    );
+    const conn = await DuckDBInstanceManager.getConnection(
+      conversationId,
+      testWorkspace,
+    );
+    try {
+      const schema = await extractSchema({
+        connection: conn,
+        viewName: 'my_sheet',
+      });
 
-    expect(schema).toBeDefined();
-    expect(schema.tables).toHaveLength(1);
-    expect(schema.tables[0].tableName).toBe('my_sheet');
-    expect(schema.tables[0].columns).toHaveLength(4);
+      expect(schema).toBeDefined();
+      expect(schema.tables).toHaveLength(1);
+      expect(schema.tables[0].tableName).toBe('my_sheet');
+      expect(schema.tables[0].columns).toHaveLength(4);
+    } finally {
+      DuckDBInstanceManager.returnConnection(
+        conversationId,
+        testWorkspace,
+        conn,
+      );
+    }
   });
 
   it('should extract schemas from all views when viewName is not provided', async () => {
     // Add another view to the database
+    const dbPath = join(testWorkspace, conversationId, 'database.db');
     const { DuckDBInstance } = await import('@duckdb/node-api');
     const instance = await DuckDBInstance.create(dbPath);
     const conn = await instance.connect();
@@ -191,14 +266,29 @@ describe('extractSchema', () => {
     }
 
     const { extractSchema } = await import('../../src/tools/extract-schema');
-    const schema = await extractSchema({
-      dbPath,
-    });
+    const { DuckDBInstanceManager } = await import(
+      '../../src/tools/duckdb-instance-manager'
+    );
+    const extractConn = await DuckDBInstanceManager.getConnection(
+      conversationId,
+      testWorkspace,
+    );
+    try {
+      const schema = await extractSchema({
+        connection: extractConn,
+      });
 
-    expect(schema).toBeDefined();
-    expect(schema.tables.length).toBeGreaterThanOrEqual(2);
-    const viewNames = schema.tables.map((t) => t.tableName);
-    expect(viewNames).toContain('my_sheet');
-    expect(viewNames).toContain('my_sheet2');
+      expect(schema).toBeDefined();
+      expect(schema.tables.length).toBeGreaterThanOrEqual(2);
+      const viewNames = schema.tables.map((t) => t.tableName);
+      expect(viewNames).toContain('my_sheet');
+      expect(viewNames).toContain('my_sheet2');
+    } finally {
+      DuckDBInstanceManager.returnConnection(
+        conversationId,
+        testWorkspace,
+        extractConn,
+      );
+    }
   });
 });

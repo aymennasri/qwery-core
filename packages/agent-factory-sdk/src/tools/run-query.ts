@@ -1,8 +1,8 @@
 export interface RunQueryOptions {
-  dbPath: string;
+  conversationId: string;
+  workspace: string;
   query: string;
-  datasourceIds?: string[];
-  datasourceRepository?: import('@qwery/domain/repositories').IDatasourceRepository;
+  checkedDatasourceIds?: string[]; // For syncing state
 }
 
 export interface RunQueryResult {
@@ -37,40 +37,23 @@ const convertBigInt = (value: unknown): unknown => {
 export const runQuery = async (
   opts: RunQueryOptions,
 ): Promise<RunQueryResult> => {
-  const { mkdir } = await import('node:fs/promises');
-  const { dirname } = await import('node:path');
-  const { DuckDBInstance } = await import('@duckdb/node-api');
+  const { DuckDBInstanceManager } = await import('./duckdb-instance-manager');
+  const { conversationId, workspace, query } = opts;
 
-  const dbDir = dirname(opts.dbPath);
-  await mkdir(dbDir, { recursive: true });
-
-  const instance = await DuckDBInstance.create(opts.dbPath);
-  const conn = await instance.connect();
+  // Get connection from manager
+  const conn = await DuckDBInstanceManager.getConnection(
+    conversationId,
+    workspace,
+  );
 
   try {
-    // Attach foreign datasources if provided (attachments are session-scoped)
-    if (
-      opts.datasourceIds &&
-      opts.datasourceIds.length > 0 &&
-      opts.datasourceRepository
-    ) {
-      const { attachAllForeignDatasourcesToConnection } = await import(
-        './foreign-datasource-attach'
-      );
-      try {
-        await attachAllForeignDatasourcesToConnection({
-          conn,
-          datasourceIds: opts.datasourceIds,
-          datasourceRepository: opts.datasourceRepository,
-        });
-      } catch (error) {
-        // Log but don't fail - query might still work with other datasources
-        console.warn('[RunQuery] Failed to attach foreign datasources:', error);
-      }
-    }
+    // Sync datasources if checkedDatasourceIds provided
+    // Note: This requires datasourceRepository which we don't have here
+    // For now, we'll sync in the caller (read-data-agent) before calling runQuery
+    // TODO: Consider passing datasourceRepository to runQuery if needed
 
-    // Execute the query on the view
-    const resultReader = await conn.runAndReadAll(opts.query);
+    // Execute the query
+    const resultReader = await conn.runAndReadAll(query);
     await resultReader.readAll();
     const rows = resultReader.getRowObjectsJS() as Array<
       Record<string, unknown>
@@ -87,7 +70,7 @@ export const runQuery = async (
       rows: convertedRows,
     };
   } finally {
-    conn.closeSync();
-    instance.closeSync();
+    // Return connection to pool instead of closing
+    DuckDBInstanceManager.returnConnection(conversationId, workspace, conn);
   }
 };

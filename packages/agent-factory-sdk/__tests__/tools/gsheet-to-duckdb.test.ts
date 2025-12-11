@@ -17,7 +17,7 @@ Bob Johnson,35,Chicago`;
 
 describe('gsheetToDuckdb', () => {
   let testWorkspace: string;
-  let dbPath: string;
+  const conversationId = 'test-conversation';
   let csvFilePath: string;
 
   beforeEach(() => {
@@ -25,7 +25,6 @@ describe('gsheetToDuckdb', () => {
       tmpdir(),
       `test-workspace-${Date.now()}-${Math.random().toString(36).substring(7)}`,
     );
-    dbPath = join(testWorkspace, 'test-conversation', 'database.db');
     csvFilePath = join(testWorkspace, 'test.csv');
 
     // Ensure directory exists
@@ -35,9 +34,20 @@ describe('gsheetToDuckdb', () => {
     writeFileSync(csvFilePath, mockCsvContent);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Clean up instance manager
+    const { DuckDBInstanceManager } = await import(
+      '../../src/tools/duckdb-instance-manager'
+    );
+    try {
+      await DuckDBInstanceManager.closeInstance(conversationId, testWorkspace);
+    } catch {
+      // Ignore cleanup errors
+    }
+
     // Clean up test database files
     try {
+      const dbPath = join(testWorkspace, conversationId, 'database.db');
       if (existsSync(dbPath)) {
         unlinkSync(dbPath);
       }
@@ -46,7 +56,7 @@ describe('gsheetToDuckdb', () => {
       }
       // Clean up workspace directory
       try {
-        rmdirSync(join(testWorkspace, 'test-conversation'));
+        rmdirSync(join(testWorkspace, conversationId));
         rmdirSync(testWorkspace);
       } catch {
         // Ignore errors
@@ -58,28 +68,27 @@ describe('gsheetToDuckdb', () => {
 
   it('should create DuckDB view from Google Sheet link', async () => {
     const { gsheetToDuckdb } = await import('../../src/tools/gsheet-to-duckdb');
+    const { DuckDBInstanceManager } = await import(
+      '../../src/tools/duckdb-instance-manager'
+    );
     // Use local CSV file path instead of URL for testing
     const sharedLink = csvFilePath;
     const viewName = 'test_sheet';
 
-    const result = await gsheetToDuckdb({
-      dbPath,
-      sharedLink,
-      viewName,
-    });
-
-    expect(result).toContain(`Successfully created view '${viewName}'`);
-    expect(result).toContain('database.db');
-
-    // Verify database file was created
-    expect(existsSync(dbPath)).toBe(true);
-
-    // Verify view exists by querying it
-    const { DuckDBInstance } = await import('@duckdb/node-api');
-    const instance = await DuckDBInstance.create(dbPath);
-    const conn = await instance.connect();
-
+    const conn = await DuckDBInstanceManager.getConnection(
+      conversationId,
+      testWorkspace,
+    );
     try {
+      const result = await gsheetToDuckdb({
+        connection: conn,
+        sharedLink,
+        viewName,
+      });
+
+      expect(result).toContain(`Successfully created view '${viewName}'`);
+
+      // Verify view exists by querying it
       const resultReader = await conn.runAndReadAll(
         `SELECT * FROM "${viewName}" LIMIT 1`,
       );
@@ -91,43 +100,81 @@ describe('gsheetToDuckdb', () => {
       expect(rows[0]).toHaveProperty('age');
       expect(rows[0]).toHaveProperty('city');
     } finally {
-      conn.closeSync();
-      instance.closeSync();
+      DuckDBInstanceManager.returnConnection(
+        conversationId,
+        testWorkspace,
+        conn,
+      );
     }
   });
 
   it('should handle non-Google Sheets links', async () => {
     const { gsheetToDuckdb } = await import('../../src/tools/gsheet-to-duckdb');
+    const { DuckDBInstanceManager } = await import(
+      '../../src/tools/duckdb-instance-manager'
+    );
     // Use local CSV file path
     const sharedLink = csvFilePath;
     const viewName = 'test_sheet';
 
-    const result = await gsheetToDuckdb({
-      dbPath,
-      sharedLink,
-      viewName,
-    });
+    const conn = await DuckDBInstanceManager.getConnection(
+      conversationId,
+      testWorkspace,
+    );
+    try {
+      const result = await gsheetToDuckdb({
+        connection: conn,
+        sharedLink,
+        viewName,
+      });
 
-    expect(result).toContain(`Successfully created view '${viewName}'`);
+      expect(result).toContain(`Successfully created view '${viewName}'`);
+    } finally {
+      DuckDBInstanceManager.returnConnection(
+        conversationId,
+        testWorkspace,
+        conn,
+      );
+    }
   });
 
   it('should create directories if they do not exist', async () => {
     const { gsheetToDuckdb } = await import('../../src/tools/gsheet-to-duckdb');
-    const newDbPath = join(testWorkspace, 'new-conversation', 'database.db');
+    const { DuckDBInstanceManager } = await import(
+      '../../src/tools/duckdb-instance-manager'
+    );
+    const newConversationId = 'new-conversation';
+    const newDbPath = join(testWorkspace, newConversationId, 'database.db');
     const viewName = 'test_sheet';
 
-    await gsheetToDuckdb({
-      dbPath: newDbPath,
-      sharedLink: csvFilePath,
-      viewName,
-    });
+    const conn = await DuckDBInstanceManager.getConnection(
+      newConversationId,
+      testWorkspace,
+    );
+    try {
+      await gsheetToDuckdb({
+        connection: conn,
+        sharedLink: csvFilePath,
+        viewName,
+      });
 
-    expect(existsSync(newDbPath)).toBe(true);
+      expect(existsSync(newDbPath)).toBe(true);
+    } finally {
+      DuckDBInstanceManager.returnConnection(
+        newConversationId,
+        testWorkspace,
+        conn,
+      );
+      await DuckDBInstanceManager.closeInstance(
+        newConversationId,
+        testWorkspace,
+      );
+    }
 
     // Cleanup
     try {
       unlinkSync(newDbPath);
-      rmdirSync(join(testWorkspace, 'new-conversation'));
+      rmdirSync(join(testWorkspace, newConversationId));
     } catch {
       // Ignore cleanup errors
     }

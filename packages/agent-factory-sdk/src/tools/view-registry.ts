@@ -466,20 +466,13 @@ export const updateViewName = async (
 
 /**
  * Validate view exists in database
- * Uses shared instance manager to ensure views created in parallel are visible
  */
 export const validateViewExists = async (
   dbPath: string,
   viewName: string,
 ): Promise<boolean> => {
   try {
-    const { mkdir } = await import('node:fs/promises');
-    const { dirname } = await import('node:path');
     const { DuckDBInstance } = await import('@duckdb/node-api');
-
-    const dbDir = dirname(dbPath);
-    await mkdir(dbDir, { recursive: true });
-
     const instance = await DuckDBInstance.create(dbPath);
     const conn = await instance.connect();
 
@@ -500,20 +493,13 @@ export const validateViewExists = async (
 
 /**
  * Rename view in database
- * Uses shared instance manager for consistency
  */
 export const renameView = async (
   dbPath: string,
   oldName: string,
   newName: string,
 ): Promise<void> => {
-  const { mkdir } = await import('node:fs/promises');
-  const { dirname } = await import('node:path');
   const { DuckDBInstance } = await import('@duckdb/node-api');
-
-  const dbDir = dirname(dbPath);
-  await mkdir(dbDir, { recursive: true });
-
   const instance = await DuckDBInstance.create(dbPath);
   const conn = await instance.connect();
 
@@ -550,20 +536,13 @@ export function isSystemOrTempTable(tableName: string): boolean {
 
 /**
  * Validate table/view exists in database
- * Uses shared instance manager to ensure views created in parallel are visible
  */
 export const validateTableExists = async (
   dbPath: string,
   tableName: string,
 ): Promise<boolean> => {
   try {
-    const { mkdir } = await import('node:fs/promises');
-    const { dirname } = await import('node:path');
     const { DuckDBInstance } = await import('@duckdb/node-api');
-
-    const dbDir = dirname(dbPath);
-    await mkdir(dbDir, { recursive: true });
-
     const instance = await DuckDBInstance.create(dbPath);
     const conn = await instance.connect();
 
@@ -585,20 +564,13 @@ export const validateTableExists = async (
 
 /**
  * Drop table/view from database
- * Uses shared instance manager for consistency
  */
 export const dropTable = async (
   dbPath: string,
   tableName: string,
 ): Promise<void> => {
   try {
-    const { mkdir } = await import('node:fs/promises');
-    const { dirname } = await import('node:path');
     const { DuckDBInstance } = await import('@duckdb/node-api');
-
-    const dbDir = dirname(dbPath);
-    await mkdir(dbDir, { recursive: true });
-
     const instance = await DuckDBInstance.create(dbPath);
     const conn = await instance.connect();
 
@@ -617,20 +589,13 @@ export const dropTable = async (
 
 /**
  * Create view from existing table/view
- * Uses shared instance manager for consistency
  */
 export const createViewFromTable = async (
   dbPath: string,
   viewName: string,
   sourceTableName: string,
 ): Promise<void> => {
-  const { mkdir } = await import('node:fs/promises');
-  const { dirname } = await import('node:path');
   const { DuckDBInstance } = await import('@duckdb/node-api');
-
-  const dbDir = dirname(dbPath);
-  await mkdir(dbDir, { recursive: true });
-
   const instance = await DuckDBInstance.create(dbPath);
   const conn = await instance.connect();
 
@@ -647,18 +612,143 @@ export const createViewFromTable = async (
 };
 
 /**
- * List all tables/views in database
- * Uses shared instance manager to ensure all views are visible
+ * List all tables/views in database using centralized manager
  */
-export const listAllTables = async (dbPath: string): Promise<string[]> => {
+export const listAllTables = async (
+  conversationId: string,
+  workspace: string,
+): Promise<string[]> => {
+  const { DuckDBInstanceManager } = await import('./duckdb-instance-manager');
+  const conn = await DuckDBInstanceManager.getConnection(
+    conversationId,
+    workspace,
+  );
+
   try {
-    const { mkdir } = await import('node:fs/promises');
-    const { dirname } = await import('node:path');
+    const allTables: string[] = [];
+
+    // Get system schema filter
+    const { getAllSystemSchemas, isSystemTableName } = await import(
+      './system-schema-filter'
+    );
+    const allSystemSchemas = getAllSystemSchemas();
+
+    // Query all databases (main + attached) using pragma_database_list
+    const databasesQuery = 'SELECT name FROM pragma_database_list;';
+
+    const dbReader = await conn.runAndReadAll(databasesQuery);
+    await dbReader.readAll();
+    const dbRows = dbReader.getRowObjectsJS() as Array<{
+      name: string;
+    }>;
+    const databases = dbRows.map((r) => ({ database_name: r.name }));
+
+    for (const db of databases) {
+      const dbName = db.database_name;
+
+      // Skip system databases
+      if (dbName === 'temp' || dbName.startsWith('_')) {
+        continue;
+      }
+
+      // Query tables and views from this database
+      // For main database, query without database prefix
+      let tablesQuery: string;
+      if (dbName === 'main') {
+        tablesQuery = `
+          SELECT table_schema, table_name, table_type
+          FROM information_schema.tables
+          WHERE table_schema = 'main'
+            AND table_type IN ('BASE TABLE', 'VIEW')
+          ORDER BY table_schema, table_name
+        `;
+      } else {
+        // For attached databases, use database prefix
+        tablesQuery = `
+          SELECT table_schema, table_name, table_type
+          FROM ${dbName}.information_schema.tables
+          WHERE table_type IN ('BASE TABLE', 'VIEW')
+          ORDER BY table_schema, table_name
+        `;
+      }
+
+      try {
+        const tablesReader = await conn.runAndReadAll(tablesQuery);
+        await tablesReader.readAll();
+        const tables = tablesReader.getRowObjectsJS() as Array<{
+          table_schema: string;
+          table_name: string;
+          table_type: string;
+        }>;
+
+        for (const table of tables) {
+          const schemaName = (table.table_schema || 'main').toLowerCase();
+
+          // Skip system schemas (NO LOGGING - just skip silently)
+          if (allSystemSchemas.has(schemaName)) {
+            continue;
+          }
+
+          // Skip system tables (NO LOGGING - just skip silently)
+          if (isSystemTableName(table.table_name)) {
+            continue;
+          }
+
+          // Format table name
+          if (dbName === 'main') {
+            // Main database: just table name
+            allTables.push(table.table_name);
+          } else {
+            // Attached database: full path
+            allTables.push(
+              `${dbName}.${table.table_schema || 'main'}.${table.table_name}`,
+            );
+          }
+        }
+      } catch (error) {
+        // If query fails for this database, skip it
+        // Only log if it's unexpected (not a permission/system issue)
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        if (
+          !errorMsg.includes('does not exist') &&
+          !errorMsg.includes('permission')
+        ) {
+          console.warn(
+            `[ViewRegistry] Failed to query database ${dbName}: ${errorMsg}`,
+          );
+        }
+      }
+    }
+
+    return allTables;
+  } finally {
+    DuckDBInstanceManager.returnConnection(conversationId, workspace, conn);
+  }
+};
+
+/**
+ * Extract timestamp from temp table name (temp_1234567890_abc)
+ */
+function extractTimestampFromTempName(tableName: string): number | null {
+  const match = tableName.match(/^temp_(\d+)_/);
+  if (match && match[1]) {
+    return parseInt(match[1], 10);
+  }
+  return null;
+}
+
+/**
+ * Clean up orphaned temp tables older than 1 hour
+ * Note: This function still uses dbPath for backward compatibility
+ * Consider refactoring to use centralized manager if needed
+ */
+export const cleanupOrphanedTempTables = async (
+  dbPath: string,
+): Promise<void> => {
+  try {
+    // For cleanup, we still use dbPath directly since this is a maintenance operation
+    // that may run outside the normal conversation context
     const { DuckDBInstance } = await import('@duckdb/node-api');
-
-    const dbDir = dirname(dbPath);
-    await mkdir(dbDir, { recursive: true });
-
     const instance = await DuckDBInstance.create(dbPath);
     const conn = await instance.connect();
 
@@ -676,43 +766,19 @@ export const listAllTables = async (dbPath: string): Promise<string[]> => {
       const rows = viewsReader.getRowObjectsJS() as Array<{
         table_name: string;
       }>;
-      return rows.map((r) => r.table_name);
+      const tables = rows.map((r) => r.table_name);
+      const tempTables = tables.filter((t) => t.startsWith('temp_'));
+
+      for (const table of tempTables) {
+        const timestamp = extractTimestampFromTempName(table);
+        if (timestamp && Date.now() - timestamp > 3600000) {
+          // Older than 1 hour
+          await dropTable(dbPath, table);
+        }
+      }
     } finally {
       conn.closeSync();
       instance.closeSync();
-    }
-  } catch {
-    return [];
-  }
-};
-
-/**
- * Extract timestamp from temp table name (temp_1234567890_abc)
- */
-function extractTimestampFromTempName(tableName: string): number | null {
-  const match = tableName.match(/^temp_(\d+)_/);
-  if (match && match[1]) {
-    return parseInt(match[1], 10);
-  }
-  return null;
-}
-
-/**
- * Clean up orphaned temp tables older than 1 hour
- */
-export const cleanupOrphanedTempTables = async (
-  dbPath: string,
-): Promise<void> => {
-  try {
-    const tables = await listAllTables(dbPath);
-    const tempTables = tables.filter((t) => t.startsWith('temp_'));
-
-    for (const table of tempTables) {
-      const timestamp = extractTimestampFromTempName(table);
-      if (timestamp && Date.now() - timestamp > 3600000) {
-        // Older than 1 hour
-        await dropTable(dbPath, table);
-      }
     }
   } catch (error) {
     // Log but don't throw
@@ -810,35 +876,4 @@ export const updateViewUsage = async (
   target.lastUsedAt = new Date().toISOString();
   target.updatedAt = target.lastUsedAt;
   await saveViewRegistry(context, registry);
-};
-
-/**
- * Get view record by view name
- */
-export const getViewByName = async (
-  context: RegistryContext,
-  viewName: string,
-): Promise<ViewRecord | null> => {
-  const registry = await loadViewRegistry(context);
-  return registry.find((record) => record.viewName === viewName) || null;
-};
-
-/**
- * Delete view from registry
- */
-export const deleteViewFromRegistry = async (
-  context: RegistryContext,
-  viewName: string,
-): Promise<boolean> => {
-  const registry = await loadViewRegistry(context);
-  const initialLength = registry.length;
-  const filtered = registry.filter((record) => record.viewName !== viewName);
-
-  if (filtered.length === initialLength) {
-    // View not found in registry
-    return false;
-  }
-
-  await saveViewRegistry(context, filtered);
-  return true;
 };

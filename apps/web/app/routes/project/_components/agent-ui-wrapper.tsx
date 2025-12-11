@@ -21,7 +21,6 @@ import { useGetDatasourcesByProjectId } from '~/lib/queries/use-get-datasources'
 import type { DatasourceItem } from '@qwery/ui/ai';
 import { useGetConversationBySlug } from '~/lib/queries/use-get-conversations';
 import { useUpdateConversation } from '~/lib/mutations/use-conversation';
-import { apiPut } from '~/lib/repositories/api-client';
 
 export interface AgentUIWrapperRef {
   sendMessage: (text: string) => void;
@@ -148,10 +147,6 @@ export const AgentUIWrapper = forwardRef<
     }));
   }, [datasources.data]);
 
-  const handleMessageUpdate = async (messageId: string, content: string) => {
-    await apiPut(`/message/${messageId}`, { content });
-  };
-
   useImperativeHandle(
     ref,
     () => ({
@@ -213,7 +208,6 @@ export const AgentUIWrapper = forwardRef<
       onDatasourceSelectionChange={handleDatasourceSelectionChange}
       pluginLogoMap={pluginLogoMap}
       datasourcesLoading={datasources.isLoading}
-      onMessageUpdate={handleMessageUpdate}
     />
   );
 });

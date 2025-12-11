@@ -35,7 +35,8 @@ export class FactoryAgent {
     this.model = opts.model;
 
     this.lifecycle = createStateMachine(
-      this.conversationId,
+      this.conversationId, // UUID (for internal tracking)
+      this.conversationSlug, // Slug (for readDataAgent)
       this.model,
       this.repositories,
     );

@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from 'react-router';
 import { DomainException } from '@qwery/domain/exceptions';
 import { CreateConversationService } from '@qwery/domain/services';
+import { generateConversationTitle } from '@qwery/agent-factory-sdk';
 import { createRepositories } from '~/lib/repositories/repositories-factory';
 
 function handleDomainException(error: unknown): Response {
@@ -48,6 +49,28 @@ export async function action({ request }: ActionFunctionArgs) {
     // POST /api/conversations - Create conversation
     if (request.method === 'POST') {
       const body = await request.json();
+
+      // Generate title from seedMessage if provided and title is default
+      if (
+        body.seedMessage &&
+        (!body.title ||
+          body.title === 'New Conversation' ||
+          body.title === body.seedMessage.slice(0, 100))
+      ) {
+        try {
+          const generatedTitle = await generateConversationTitle(
+            body.seedMessage,
+          );
+          body.title = generatedTitle;
+        } catch (error) {
+          console.error('Error generating conversation title:', error);
+          // Fallback to default title if generation fails
+          if (!body.title) {
+            body.title = body.seedMessage.slice(0, 100) || 'New Conversation';
+          }
+        }
+      }
+
       const useCase = new CreateConversationService(repository);
       const conversation = await useCase.execute(body);
       return Response.json(conversation, { status: 201 });

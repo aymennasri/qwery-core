@@ -5,14 +5,15 @@ import { IConversationRepository } from '@qwery/domain/repositories';
 import {
   CreateConversationService,
   UpdateConversationService,
+  DeleteConversationService,
 } from '@qwery/domain/services';
+import { getConversationsKey } from '~/lib/queries/use-get-conversations';
 import { getConversationsByProjectKey } from '~/lib/queries/use-get-conversations-by-project';
 import {
   ConversationOutput,
   CreateConversationInput,
   UpdateConversationInput,
 } from '@qwery/domain/usecases';
-import { getConversationsKey } from '../queries/use-get-conversations';
 
 export function getConversationKey(slug: string) {
   return ['conversation', slug];
@@ -37,12 +38,25 @@ export function useConversation(
       queryClient.invalidateQueries({
         queryKey: getConversationKey(conversation.slug),
       });
-      // Invalidate project-scoped conversations list
+      queryClient.invalidateQueries({
+        queryKey: getConversationsKey(),
+      });
+      // Invalidate project-scoped conversations if projectId provided
       if (projectId) {
         queryClient.invalidateQueries({
           queryKey: getConversationsByProjectKey(projectId),
         });
       }
+      // Keep existing predicate-based invalidation as fallback
+      queryClient.invalidateQueries({
+        predicate: (query) => {
+          return (
+            Array.isArray(query.queryKey) &&
+            query.queryKey[0] === 'conversations' &&
+            query.queryKey[1] === 'project'
+          );
+        },
+      });
       // Convert DTO back to Conversation for the callback
       onSuccess(conversation as unknown as Conversation);
     },
@@ -68,6 +82,46 @@ export function useUpdateConversation(
       });
       queryClient.invalidateQueries({
         queryKey: getConversationsKey(),
+      });
+      // Invalidate all project-specific conversation queries
+      queryClient.invalidateQueries({
+        predicate: (query) => {
+          return (
+            Array.isArray(query.queryKey) &&
+            query.queryKey[0] === 'conversations' &&
+            query.queryKey[1] === 'project'
+          );
+        },
+      });
+    },
+  });
+}
+
+export function useDeleteConversation(
+  conversationRepository: IConversationRepository,
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (conversationId: string) => {
+      const deleteConversationService = new DeleteConversationService(
+        conversationRepository,
+      );
+      return await deleteConversationService.execute(conversationId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: getConversationsKey(),
+      });
+      // Invalidate all project-specific conversation queries
+      queryClient.invalidateQueries({
+        predicate: (query) => {
+          return (
+            Array.isArray(query.queryKey) &&
+            query.queryKey[0] === 'conversations' &&
+            query.queryKey[1] === 'project'
+          );
+        },
       });
     },
   });

@@ -24,24 +24,15 @@ import {
   ToolInput,
   ToolOutput,
 } from '../../ai-elements/tool';
-import { ChartRenderer, type ChartConfig } from './charts/chart-renderer';
-import {
-  ChartTypeSelector,
-  type ChartTypeSelection,
-} from './charts/chart-type-selector';
-import {
-  SQLQueryVisualizer,
-  type SQLQueryResult,
-} from './sql-query-visualizer';
-import { SchemaVisualizer, type SchemaData } from './schema-visualizer';
-import {
-  AvailableSheetsVisualizer,
-  type AvailableSheetsData,
-} from './sheets/available-sheets-visualizer';
-import {
-  ViewSheetVisualizer,
-  type ViewSheetData,
-} from './sheets/view-sheet-visualizer';
+
+import { SQLQueryVisualizer } from './sql-query-visualizer';
+
+import { SchemaVisualizer } from './schema-visualizer';
+
+import { AvailableSheetsVisualizer } from './sheets/available-sheets-visualizer';
+
+import { ViewSheetVisualizer } from './sheets/view-sheet-visualizer';
+
 import { ViewSheetError } from './sheets/view-sheet-error';
 import {
   Source,
@@ -49,9 +40,12 @@ import {
   SourcesContent,
   SourcesTrigger,
 } from '../../ai-elements/sources';
-import { useMemo, useState } from 'react';
-import { CopyIcon, RefreshCcwIcon, XCircleIcon, CheckIcon } from 'lucide-react';
+import { useState } from 'react';
+import { CopyIcon, RefreshCcwIcon, CheckIcon } from 'lucide-react';
 import { ToolUIPart } from 'ai';
+import { ToolErrorVisualizer } from './tool-error-visualizer';
+
+import { ChartRenderer, type ChartConfig } from './charts/chart-renderer';
 
 export type TaskStatus = 'pending' | 'in-progress' | 'completed' | 'error';
 
@@ -225,413 +219,137 @@ export interface ToolPartProps {
   index: number;
 }
 
-function ChartToolOutput({
-  output,
-  errorText,
-}: {
-  output: ToolUIPart['output'];
-  errorText: ToolUIPart['errorText'];
-}) {
-  if (errorText) {
-    return <ToolOutput output={output} errorText={errorText} />;
-  }
-
-  if (!output) {
-    return <ToolOutput output={output} errorText={errorText} />;
-  }
-
-  // Parse output - it might be a string (JSON) or an object
-  let parsedOutput: unknown = output;
-  if (typeof output === 'string') {
-    try {
-      parsedOutput = JSON.parse(output);
-    } catch {
-      // If parsing fails, it's not JSON, fall back to regular output
-      return <ToolOutput output={output} errorText={errorText} />;
-    }
-  }
-
-  // Debug logging
-  if (process.env.NODE_ENV === 'development') {
-    console.log('[ChartToolOutput] Output type:', typeof output);
-    console.log('[ChartToolOutput] Parsed output:', parsedOutput);
-  }
-
-  // Check if output matches chart config structure
-  if (
-    parsedOutput &&
-    typeof parsedOutput === 'object' &&
-    !Array.isArray(parsedOutput) &&
-    'chartType' in parsedOutput &&
-    'data' in parsedOutput &&
-    'config' in parsedOutput
-  ) {
-    const chartConfig = parsedOutput as ChartConfig;
-
-    // Validate chart config has required fields
-    if (
-      !chartConfig.chartType ||
-      !Array.isArray(chartConfig.data) ||
-      !chartConfig.config
-    ) {
-      console.warn(
-        '[ChartToolOutput] Invalid chart config structure:',
-        chartConfig,
-      );
-      return <ToolOutput output={output} errorText={errorText} />;
-    }
-
-    return (
-      <div className="min-w-0 space-y-2 p-4">
-        <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-          Chart
-        </h4>
-        <div className="bg-muted/50 w-full max-w-full min-w-0 overflow-hidden rounded-md p-4">
-          <ChartRenderer chartConfig={chartConfig} />
-        </div>
-      </div>
-    );
-  }
-
-  return <ToolOutput output={output} errorText={errorText} />;
-}
-
-function ChartTypeSelectionOutput({
-  output,
-  errorText,
-}: {
-  output: ToolUIPart['output'];
-  errorText: ToolUIPart['errorText'];
-}) {
-  if (errorText) {
-    return <ToolOutput output={output} errorText={errorText} />;
-  }
-
-  if (!output) {
-    return <ToolOutput output={output} errorText={errorText} />;
-  }
-
-  // Parse output - it might be a string (JSON) or an object
-  let parsedOutput: unknown = output;
-  if (typeof output === 'string') {
-    try {
-      parsedOutput = JSON.parse(output);
-    } catch {
-      return <ToolOutput output={output} errorText={errorText} />;
-    }
-  }
-
-  // Check if output matches chart type selection structure
-  if (
-    parsedOutput &&
-    typeof parsedOutput === 'object' &&
-    !Array.isArray(parsedOutput) &&
-    'chartType' in parsedOutput &&
-    'reasoning' in parsedOutput
-  ) {
-    const selection = parsedOutput as ChartTypeSelection;
-    return (
-      <div className="min-w-0 space-y-2 p-4">
-        <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-          Chart Type Selection
-        </h4>
-        <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4">
-          <ChartTypeSelector selection={selection} />
-        </div>
-      </div>
-    );
-  }
-
-  return <ToolOutput output={output} errorText={errorText} />;
-}
-
-function SchemaOutput({
-  output,
-  errorText,
-}: {
-  output: ToolUIPart['output'];
-  errorText: ToolUIPart['errorText'];
-}) {
-  if (errorText) {
-    return <ToolOutput output={output} errorText={errorText} />;
-  }
-
-  if (!output) {
-    return <ToolOutput output={output} errorText={errorText} />;
-  }
-
-  // Parse output - it might be a string (JSON) or an object
-  let parsedOutput: unknown = output;
-  if (typeof output === 'string') {
-    try {
-      parsedOutput = JSON.parse(output);
-    } catch {
-      return <ToolOutput output={output} errorText={errorText} />;
-    }
-  }
-
-  // Check if output matches schema structure
-  if (
-    parsedOutput &&
-    typeof parsedOutput === 'object' &&
-    !Array.isArray(parsedOutput) &&
-    'schema' in parsedOutput &&
-    parsedOutput.schema &&
-    typeof parsedOutput.schema === 'object' &&
-    'tables' in parsedOutput.schema
-  ) {
-    const schema = parsedOutput.schema as SchemaData;
-    return (
-      <div className="min-w-0 space-y-2 p-4">
-        <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-          Schema
-        </h4>
-        <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4">
-          <SchemaVisualizer schema={schema} />
-        </div>
-      </div>
-    );
-  }
-
-  return <ToolOutput output={output} errorText={errorText} />;
-}
-
-function SQLQueryOutput({
-  output,
-  input,
-  errorText,
-}: {
-  output: ToolUIPart['output'];
-  input: ToolUIPart['input'];
-  errorText: ToolUIPart['errorText'];
-}) {
-  // Extract query from input (always extract, even on error)
-  let query: string | undefined;
-  if (input && typeof input === 'object' && 'query' in input) {
-    query = typeof input.query === 'string' ? input.query : undefined;
-  }
-
-  // If there's an error, display the query and the error
-  if (errorText) {
-    return (
-      <div className="min-w-0 space-y-4 p-4">
-        {query && <SQLQueryVisualizer query={query} />}
-        <div className="space-y-2">
-          <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-            Error
-          </h4>
-          <div className="bg-destructive/10 border-destructive/20 max-w-full min-w-0 rounded-md border p-4">
-            <div className="flex items-start gap-2">
-              <XCircleIcon className="text-destructive mt-0.5 size-4 shrink-0" />
-              <div className="min-w-0 flex-1">
-                <pre className="text-destructive m-0 font-sans text-sm wrap-break-word whitespace-pre-wrap">
-                  {errorText}
-                </pre>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!output) {
-    return <ToolOutput output={output} errorText={errorText} />;
-  }
-
-  // Parse output - it might be a string (JSON) or an object
-  let parsedOutput: unknown = output;
-  if (typeof output === 'string') {
-    try {
-      parsedOutput = JSON.parse(output);
-    } catch {
-      return <ToolOutput output={output} errorText={errorText} />;
-    }
-  }
-
-  // Check if output matches SQL query result structure
-  if (
-    parsedOutput &&
-    typeof parsedOutput === 'object' &&
-    !Array.isArray(parsedOutput) &&
-    'result' in parsedOutput &&
-    parsedOutput.result &&
-    typeof parsedOutput.result === 'object' &&
-    'columns' in parsedOutput.result &&
-    'rows' in parsedOutput.result
-  ) {
-    const result = parsedOutput as SQLQueryResult;
-    return (
-      <div className="min-w-0 space-y-2 p-4">
-        <SQLQueryVisualizer query={query} result={result} />
-      </div>
-    );
-  }
-
-  return <ToolOutput output={output} errorText={errorText} />;
-}
-
-function AvailableSheetsOutput({
-  output,
-  errorText,
-}: {
-  output: ToolUIPart['output'];
-  errorText: ToolUIPart['errorText'];
-}) {
-  const parsedOutput = useMemo(() => {
-    if (!output) return null;
-    if (typeof output === 'string') {
-      try {
-        return JSON.parse(output);
-      } catch {
-        return null;
-      }
-    }
-    return output;
-  }, [output]);
-
-  // Memoize adapted data to prevent creating new object on every render
-  const adaptedData = useMemo(() => {
-    if (!parsedOutput) return null;
-
-    // Check if output matches listViews structure (views array)
-    if (
-      parsedOutput &&
-      typeof parsedOutput === 'object' &&
-      !Array.isArray(parsedOutput) &&
-      'views' in parsedOutput &&
-      Array.isArray(parsedOutput.views)
-    ) {
-      const viewsData = parsedOutput as {
-        views: Array<{
-          viewName: string;
-          displayName?: string;
-        }>;
-        message: string;
-      };
-      return {
-        sheets: viewsData.views.map((view) => ({
-          name: view.viewName,
-          type: 'view' as const,
-        })),
-        message: viewsData.message,
-      } as AvailableSheetsData;
-    }
-
-    // Check if output matches available sheets structure (backward compatibility)
-    if (
-      parsedOutput &&
-      typeof parsedOutput === 'object' &&
-      !Array.isArray(parsedOutput) &&
-      'sheets' in parsedOutput &&
-      Array.isArray(parsedOutput.sheets)
-    ) {
-      return parsedOutput as AvailableSheetsData;
-    }
-
-    return null;
-  }, [parsedOutput]);
-
-  if (errorText) {
-    return <ToolOutput output={output} errorText={errorText} />;
-  }
-
-  if (!output || !adaptedData) {
-    return <ToolOutput output={output} errorText={errorText} />;
-  }
-
-  return (
-    <div className="min-w-0 p-4">
-      <AvailableSheetsVisualizer data={adaptedData} />
-    </div>
-  );
-}
-
-function ViewSheetOutput({
-  output,
-  errorText,
-  input,
-  availableSheets,
-  onRetry,
-}: {
-  output: ToolUIPart['output'];
-  errorText: ToolUIPart['errorText'];
-  input?: ToolUIPart['input'];
-  availableSheets?: string[];
-  onRetry?: (sheetName: string) => void;
-}) {
-  if (errorText) {
-    // Extract sheet name from input if available
-    let sheetName: string | undefined;
-    if (input && typeof input === 'object' && 'sheetName' in input) {
-      sheetName =
-        typeof input.sheetName === 'string' ? input.sheetName : undefined;
-    }
-
-    return (
-      <div className="min-w-0 space-y-2 p-4">
-        <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-          Sheet View
-        </h4>
-        <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4">
-          <ViewSheetError
-            errorText={errorText}
-            sheetName={sheetName}
-            availableSheets={availableSheets}
-            onRetry={onRetry}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (!output) {
-    return <ToolOutput output={output} errorText={errorText} />;
-  }
-
-  // Parse output - it might be a string (JSON) or an object
-  let parsedOutput: unknown = output;
-  if (typeof output === 'string') {
-    try {
-      parsedOutput = JSON.parse(output);
-    } catch {
-      return <ToolOutput output={output} errorText={errorText} />;
-    }
-  }
-
-  // Check if output matches view sheet structure
-  if (
-    parsedOutput &&
-    typeof parsedOutput === 'object' &&
-    !Array.isArray(parsedOutput) &&
-    'sheetName' in parsedOutput &&
-    'columns' in parsedOutput &&
-    'rows' in parsedOutput
-  ) {
-    const data = parsedOutput as ViewSheetData;
-    return (
-      <div className="min-w-0 space-y-2 p-4">
-        <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-          Sheet View
-        </h4>
-        <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4">
-          <ViewSheetVisualizer data={data} />
-        </div>
-      </div>
-    );
-  }
-
-  return <ToolOutput output={output} errorText={errorText} />;
-}
-
 export function ToolPart({ part, messageId, index }: ToolPartProps) {
   const toolName = part.type.replace('tool-', '');
-  const isGenerateChart = part.type === 'tool-generateChart';
-  const isSelectChartType = part.type === 'tool-selectChartType';
-  const isRunQuery = part.type === 'tool-runQuery';
-  const isGetSchema = part.type === 'tool-getSchema';
-  const isListAvailableSheets = part.type === 'tool-listAvailableSheets';
-  const isViewSheet = part.type === 'tool-viewSheet';
+  // Render specialized visualizers based on tool type
+  const renderToolOutput = () => {
+    // Handle errors with ToolErrorVisualizer
+    if (part.state === 'output-error' && part.errorText) {
+      return <ToolErrorVisualizer errorText={part.errorText} />;
+    }
+
+    // Handle runQuery tool with SQLQueryVisualizer
+    if (part.type === 'tool-runQuery' && part.output) {
+      const input = part.input as { query?: string } | null;
+      const output = part.output as {
+        result?: { columns: string[]; rows: Array<Record<string, unknown>> };
+      } | null;
+      return (
+        <SQLQueryVisualizer
+          query={input?.query}
+          result={
+            output?.result
+              ? {
+                  result: {
+                    columns: output.result.columns,
+                    rows: output.result.rows,
+                  },
+                }
+              : undefined
+          }
+        />
+      );
+    }
+
+    // Handle getSchema tool with SchemaVisualizer
+    if (part.type === 'tool-getSchema' && part.output) {
+      const output = part.output as {
+        schema?: {
+          databaseName: string;
+          schemaName: string;
+          tables: Array<{
+            tableName: string;
+            columns: Array<{ columnName: string; columnType: string }>;
+          }>;
+        };
+      } | null;
+      if (output?.schema) {
+        return <SchemaVisualizer schema={output.schema} />;
+      }
+    }
+
+    // Handle listAvailableSheets tool with AvailableSheetsVisualizer
+    if (part.type === 'tool-listAvailableSheets' && part.output) {
+      const output = part.output as {
+        sheets?: Array<{
+          name: string;
+          type: 'view' | 'table' | 'attached_table';
+        }>;
+        count?: number;
+      } | null;
+      if (output?.sheets) {
+        // Map tool output to visualizer format
+        const mappedSheets = output.sheets.map((sheet) => ({
+          name: sheet.name,
+          type: sheet.type === 'attached_table' ? 'table' : sheet.type,
+        }));
+        return (
+          <AvailableSheetsVisualizer
+            data={{
+              sheets: mappedSheets,
+              message: `Found ${output.count ?? mappedSheets.length} sheet${(output.count ?? mappedSheets.length) !== 1 ? 's' : ''}`,
+            }}
+          />
+        );
+      }
+    }
+
+    // Handle viewSheet tool with ViewSheetVisualizer
+    if (part.type === 'tool-viewSheet' && part.output) {
+      const output = part.output as {
+        sheetName?: string;
+        columns?: string[];
+        rows?: Array<Record<string, unknown>>;
+        rowCount?: number;
+        limit?: number;
+        hasMore?: boolean;
+      } | null;
+      if (output?.sheetName && output?.columns && output?.rows !== undefined) {
+        const displayedRows = output.rows.length;
+        const totalRows = output.rowCount ?? displayedRows;
+        return (
+          <ViewSheetVisualizer
+            data={{
+              sheetName: output.sheetName,
+              totalRows,
+              displayedRows,
+              columns: output.columns,
+              rows: output.rows,
+              message: output.hasMore
+                ? `Showing first ${displayedRows} of ${totalRows} rows`
+                : `Displaying all ${totalRows} rows`,
+            }}
+          />
+        );
+      }
+    }
+
+    // Handle viewSheet errors with ViewSheetError
+    if (
+      part.type === 'tool-viewSheet' &&
+      part.state === 'output-error' &&
+      part.errorText
+    ) {
+      const input = part.input as { sheetName?: string } | null;
+      return (
+        <ViewSheetError
+          errorText={part.errorText}
+          sheetName={input?.sheetName}
+        />
+      );
+    }
+
+    // Handle generateChart tool with ChartRenderer
+    if (part.type === 'tool-generateChart' && part.output) {
+      const output = part.output as ChartConfig | null;
+      if (output?.chartType && output?.data && output?.config) {
+        return <ChartRenderer chartConfig={output} />;
+      }
+    }
+
+    // Default fallback to generic ToolOutput
+    return <ToolOutput output={part.output} errorText={part.errorText} />;
+  };
 
   return (
     <Tool
@@ -640,38 +358,8 @@ export function ToolPart({ part, messageId, index }: ToolPartProps) {
     >
       <ToolHeader title={toolName} type={part.type} state={part.state} />
       <ToolContent>
-        {part.input != null &&
-        !isRunQuery &&
-        !isGetSchema &&
-        !isListAvailableSheets &&
-        !isViewSheet ? (
-          <ToolInput input={part.input} />
-        ) : null}
-        {isSelectChartType ? (
-          <ChartTypeSelectionOutput
-            output={part.output}
-            errorText={part.errorText}
-          />
-        ) : isGenerateChart ? (
-          <ChartToolOutput output={part.output} errorText={part.errorText} />
-        ) : isGetSchema ? (
-          <SchemaOutput output={part.output} errorText={part.errorText} />
-        ) : isRunQuery ? (
-          <SQLQueryOutput
-            output={part.output}
-            input={part.input}
-            errorText={part.errorText}
-          />
-        ) : isListAvailableSheets ? (
-          <AvailableSheetsOutput
-            output={part.output}
-            errorText={part.errorText}
-          />
-        ) : isViewSheet ? (
-          <ViewSheetOutput output={part.output} errorText={part.errorText} />
-        ) : (
-          <ToolOutput output={part.output} errorText={part.errorText} />
-        )}
+        {part.input != null ? <ToolInput input={part.input} /> : null}
+        {renderToolOutput()}
       </ToolContent>
     </Tool>
   );
