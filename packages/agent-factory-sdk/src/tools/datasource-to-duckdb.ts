@@ -46,9 +46,7 @@ export async function datasourceToDuckdb(
 
   // Generate deterministic view name with datasource ID to prevent collisions
   const baseName =
-    datasource.name?.trim() ||
-    datasource.datasource_provider?.trim() ||
-    'data';
+    datasource.name?.trim() || datasource.datasource_provider?.trim() || 'data';
   const tablePart = 'sheet'; // Default table part for DuckDB-native providers
   // Include datasource ID in view name to prevent collisions
   const viewName = sanitizeName(
