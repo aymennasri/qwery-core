@@ -123,18 +123,6 @@ function getConnectionStringForType(
           const url = new URL(connectionUrl);
           url.searchParams.delete('channel_binding');
 
-          // Both sslmode=prefer and sslmode=require work with DuckDB
-          // Keep existing sslmode if set, otherwise default to prefer
-          const currentSslMode = url.searchParams.get('sslmode');
-          if (!currentSslMode) {
-            // Default to prefer for secure connections (more forgiving)
-            url.searchParams.set('sslmode', 'prefer');
-          }
-          // If sslmode=disable, change to prefer (servers like Neon require SSL)
-          if (currentSslMode === 'disable') {
-            url.searchParams.set('sslmode', 'prefer');
-          }
-
           return url.toString();
         } catch {
           // Fallback: simple string replacement if URL parsing fails

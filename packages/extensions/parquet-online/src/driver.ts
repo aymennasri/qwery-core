@@ -10,7 +10,7 @@ import type {
 import { DatasourceMetadataZodSchema } from '@qwery/extensions-sdk';
 
 const ConfigSchema = z.object({
-  parquetUrl: z.string().url().describe('Public Parquet file URL'),
+  url: z.string().url().describe('Public Parquet file URL'),
 });
 
 type DriverConfig = z.infer<typeof ConfigSchema>;
@@ -28,13 +28,13 @@ export function makeParquetDriver(context: DriverContext): IDataSourceDriver {
   };
 
   const getInstance = async (config: DriverConfig) => {
-    const key = config.parquetUrl;
+    const key = config.url;
     if (!instanceMap.has(key)) {
       const instance = await createDuckDbInstance();
       const conn = await instance.connect();
 
       try {
-        const escapedUrl = config.parquetUrl.replace(/'/g, "''");
+        const escapedUrl = config.url.replace(/'/g, "''");
         const escapedViewName = VIEW_NAME.replace(/"/g, '""');
 
         // Create view from Parquet URL using read_parquet

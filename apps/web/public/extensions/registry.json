@@ -200,14 +200,14 @@
       "schema": {
         "type": "object",
         "properties": {
-          "parquetUrl": {
+          "url": {
             "type": "string",
             "description": "Public Parquet file URL",
             "format": "uri"
           }
         },
         "required": [
-          "parquetUrl"
+          "url"
         ]
       },
       "packageName": "@qwery/extension-parquet-online",

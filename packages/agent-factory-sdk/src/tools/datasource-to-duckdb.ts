@@ -43,6 +43,8 @@ export async function datasourceToDuckdb(
     'csv',
     'json-online',
     'parquet-online',
+    'clickhouse-node',
+    'youtube-data-api-v3',
   ];
 
   // Generate deterministic view name with datasource ID to prevent collisions
@@ -59,50 +61,97 @@ export async function datasourceToDuckdb(
   // Handle DuckDB-native providers that don't need driver loading
   if (duckdbNativeProviders.includes(provider)) {
     // Create view directly from source without a temp table
-    if (provider === 'gsheet-csv') {
-      const sharedLink =
-        (config.sharedLink as string) || (config.url as string);
-      if (!sharedLink) {
-        throw new Error(
-          'gsheet-csv datasource requires sharedLink or url in config',
-        );
+    switch (provider) {
+      case 'gsheet-csv': {
+        const sharedLink =
+          (config.sharedLink as string) || (config.url as string);
+        if (!sharedLink) {
+          throw new Error(
+            'gsheet-csv datasource requires sharedLink or url in config',
+          );
+        }
+        await gsheetToDuckdb({
+          connection: conn,
+          sharedLink,
+          viewName: escapedViewName,
+        });
+        break;
       }
-      await gsheetToDuckdb({
-        connection: conn,
-        sharedLink,
-        viewName: escapedViewName,
-      });
-    } else if (provider === 'csv') {
-      const path = (config.path as string) || (config.url as string);
-      if (!path) {
-        throw new Error('csv datasource requires path or url in config');
-      }
-      await conn.run(`
+      case 'csv': {
+        const path =
+          (config.path as string) ||
+          (config.url as string) ||
+          (config.connectionUrl as string);
+        if (!path) {
+          throw new Error('csv datasource requires path or url in config');
+        }
+        await conn.run(`
         CREATE OR REPLACE VIEW "${escapedViewName}" AS
         SELECT * FROM read_csv_auto('${path.replace(/'/g, "''")}')
       `);
-    } else if (provider === 'json-online') {
-      const url = (config.url as string) || (config.path as string);
-      if (!url) {
-        throw new Error(
-          'json-online datasource requires url or path in config',
-        );
+        break;
       }
-      await conn.run(`
+      case 'json-online': {
+        const url =
+          (config.url as string) ||
+          (config.path as string) ||
+          (config.connectionUrl as string);
+        if (!url) {
+          throw new Error(
+            'json-online datasource requires url or path in config',
+          );
+        }
+        await conn.run(`
         CREATE OR REPLACE VIEW "${escapedViewName}" AS
         SELECT * FROM read_json_auto('${url.replace(/'/g, "''")}')
       `);
-    } else if (provider === 'parquet-online') {
-      const url = (config.url as string) || (config.path as string);
-      if (!url) {
-        throw new Error(
-          'parquet-online datasource requires url or path in config',
-        );
+        break;
       }
-      await conn.run(`
+      case 'parquet-online': {
+        const url =
+          (config.url as string) ||
+          (config.path as string) ||
+          (config.connectionUrl as string);
+        if (!url) {
+          throw new Error(
+            'parquet-online datasource requires url or path in config',
+          );
+        }
+        await conn.run(`
         CREATE OR REPLACE VIEW "${escapedViewName}" AS
         SELECT * FROM read_parquet('${url.replace(/'/g, "''")}')
       `);
+        break;
+      }
+      case 'clickhouse-node': {
+        const url =
+          (config.url as string) ||
+          (config.path as string) ||
+          (config.connectionUrl as string);
+        const query =
+          (config.query as string) || (config.sql as string) || 'SELECT 1';
+        if (!url) {
+          throw new Error(
+            'clickhouse-node datasource requires url or path in config',
+          );
+        }
+
+        // Ensure ClickHouse SQL extension is available
+        await conn.run(`SET allow_community_extensions = true;`);
+        await conn.run(`INSTALL chsql FROM community;`);
+        await conn.run(`LOAD chsql;`);
+
+        const escapedUrl = url.replace(/'/g, "''");
+        const escapedQuery = query.replace(/'/g, "''");
+
+        await conn.run(`
+        CREATE OR REPLACE VIEW "${escapedViewName}" AS
+        SELECT * FROM ch_scan('${escapedQuery}', '${escapedUrl}', format := 'Parquet')
+      `);
+        break;
+      }
+      default:
+        break;
     }
 
     // Verify the view was created successfully by trying to query it

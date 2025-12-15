@@ -11239,37 +11239,6 @@ var coerce = {
 };
 var NEVER = INVALID;
 
-// packages/extensions-sdk/src/manifest-discovery.ts
-var PackageJsonSchema = external_exports.object({
-  name: external_exports.string(),
-  version: external_exports.string(),
-  main: external_exports.string().optional(),
-  displayName: external_exports.string().optional(),
-  description: external_exports.string().optional(),
-  icon: external_exports.string().optional(),
-  contributes: external_exports.object({
-    datasources: external_exports.array(
-      external_exports.object({
-        id: external_exports.string(),
-        name: external_exports.string(),
-        description: external_exports.string().optional(),
-        icon: external_exports.string().optional(),
-        schema: external_exports.record(external_exports.any()),
-        drivers: external_exports.array(external_exports.string()).optional()
-      })
-    ).optional(),
-    drivers: external_exports.array(
-      external_exports.object({
-        id: external_exports.string(),
-        name: external_exports.string(),
-        description: external_exports.string().optional(),
-        runtime: external_exports.enum(["node", "browser"]).optional(),
-        entry: external_exports.string().optional()
-      })
-    ).optional()
-  }).optional()
-});
-
 // packages/domain/src/entities/index.ts
 var import_reflect_metadata = __toESM(require_Reflect());
 

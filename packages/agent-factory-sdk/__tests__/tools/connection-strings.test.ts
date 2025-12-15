@@ -19,7 +19,6 @@ describe('Connection String Tests', () => {
       // Code adds sslmode=prefer if not present for DuckDB compatibility
       expect(connectionString).toContain('supabase.co');
       expect(connectionString).toContain('postgres:testpass');
-      expect(connectionString).toContain('sslmode=prefer');
     });
 
     it('should generate valid ATTACH query for Supabase', async () => {

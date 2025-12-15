@@ -68,7 +68,7 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
     models,
     onOpen,
     usage,
-    emitFinish: _emitFinish,
+    emitFinish,
     datasources,
     selectedDatasources,
     onDatasourceSelectionChange,
@@ -224,6 +224,12 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
   const [regenCountsMap, setRegenCountsMap] = useState<Map<string, number>>(
     new Map(),
   );
+
+  useEffect(() => {
+    if (status === 'ready') {
+      emitFinish?.();
+    }
+  }, [status, emitFinish]);
 
   useEffect(() => {
     const counts = new Map<string, number>();

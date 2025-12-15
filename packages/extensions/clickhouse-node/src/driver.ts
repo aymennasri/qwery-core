@@ -204,7 +204,7 @@ export function makeClickHouseDriver(context: DriverContext): IDataSourceDriver 
         rls_enabled: false,
         rls_forced: false,
         bytes: Number(table.totalBytes) || 0,
-        size: table.totalRows || '0',
+        size: String(table.totalRows ?? '0'),
         live_rows_estimate: Number(table.totalRows) || 0,
         dead_rows_estimate: 0,
         comment: null,
