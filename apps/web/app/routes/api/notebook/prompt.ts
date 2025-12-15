@@ -27,8 +27,7 @@ if (typeof setInterval !== 'undefined') {
         const agent = agents.get(slug);
         if (agent) {
           try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (agent as any).factoryActor?.stop();
+            agent.stop();
           } catch (error) {
             console.warn(`Error stopping agent ${slug}:`, error);
           }

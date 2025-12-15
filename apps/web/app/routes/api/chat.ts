@@ -28,8 +28,7 @@ if (typeof setInterval !== 'undefined') {
         const agent = agents.get(slug);
         if (agent) {
           try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (agent as any).factoryActor?.stop();
+            agent.stop();
           } catch (error) {
             console.warn(`Error stopping agent ${slug}:`, error);
           }
@@ -137,8 +136,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         if (cachedAgent) {
           try {
             // Stop the old agent
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (cachedAgent as any).factoryActor?.stop();
+            cachedAgent.stop();
           } catch (error) {
             console.warn(`Error stopping agent ${conversationSlug}:`, error);
           }
@@ -178,6 +176,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
       }
     }
 
+    // CRITICAL: Compute shouldGenerateTitle AFTER all conversation updates
+    // This ensures we use the latest conversation state after datasource updates
     const shouldGenerateTitle =
       conversation &&
       conversation.title === 'New Conversation' &&

@@ -167,7 +167,7 @@ export class FactoryAgent {
           subscription.unsubscribe();
           reject(
             new Error(
-              `FactoryAgent response timeout: state machine did not produce streamResult within 120 seconds. Last state: ${lastState}, state changes: ${stateChangeCount}`,
+              `FactoryAgent response timeout: state machine did not produce streamResult within 60 seconds. Last state: ${lastState}, state changes: ${stateChangeCount}`,
             ),
           );
         }

@@ -104,7 +104,7 @@ export const AgentUIWrapper = forwardRef<
   { conversationSlug, initialMessages, isMessagesLoading = false },
   ref,
 ) {
-  const sendMessageRef = useRef<((text: string) => void) | null>(null);
+  const sendMessageRef = useRef<((text: string) => Promise<void>) | null>(null);
   const internalSendMessageRef = useRef<SendMessageFn | null>(null);
   const setMessagesRef = useRef<
     | ((messages: UIMessage[] | ((prev: UIMessage[]) => UIMessage[])) => void)
@@ -161,17 +161,29 @@ export const AgentUIWrapper = forwardRef<
     | undefined
   >(undefined);
 
+  // Track if we've already initialized datasource from cell to prevent overwriting user selections
+  const initializedCellDatasourceRef = useRef<string | null>(null);
+
   // Mutation to update conversation datasources
   const updateConversation = useUpdateConversation(repositories.conversation);
 
   // Update conversation when cell datasource is provided (initial setup)
   // This runs once when cellDatasource is first set, before any messages are sent
+  // CRITICAL: Only runs once per cellDatasource value to avoid overwriting user selections
   useEffect(() => {
+    // Only initialize if:
+    // 1. We have a cell datasource
+    // 2. We haven't already initialized for this cell datasource
+    // 3. Conversation is loaded
     if (
       cellDatasource &&
       conversation?.id &&
+      initializedCellDatasourceRef.current !== cellDatasource &&
       !conversationDatasources.includes(cellDatasource)
     ) {
+      // Mark as initialized to prevent re-running when conversationDatasources changes
+      initializedCellDatasourceRef.current = cellDatasource;
+
       // Update conversation to include cell datasource immediately
       // This ensures the datasource is set before the message is sent
       updateConversation.mutate(
@@ -194,9 +206,16 @@ export const AgentUIWrapper = forwardRef<
         setPendingDatasources([cellDatasource]);
       });
     }
+
+    // Reset initialization tracking when cellDatasource is cleared
+    if (!cellDatasource) {
+      initializedCellDatasourceRef.current = null;
+    }
   }, [
     cellDatasource,
     conversation?.id,
+    // CRITICAL: Only check conversationDatasources for the initial condition check
+    // The ref prevents re-running when conversationDatasources changes due to user selection
     conversationDatasources,
     updateConversation,
     workspace.username,
@@ -387,7 +406,7 @@ export const AgentUIWrapper = forwardRef<
 
           // Send message with metadata - useChat should preserve metadata if passed in message object
           // We'll also update the message after it's created as a fallback
-          internalSendMessageRef.current(
+          await internalSendMessageRef.current(
             {
               text,
               ...(Object.keys(messageMetadata).length > 0
@@ -458,8 +477,8 @@ export const AgentUIWrapper = forwardRef<
   useImperativeHandle(
     ref,
     () => ({
-      sendMessage: (text: string) => {
-        sendMessageRef.current?.(text);
+      sendMessage: async (text: string) => {
+        await sendMessageRef.current?.(text);
       },
     }),
     [],

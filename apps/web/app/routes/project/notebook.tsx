@@ -192,10 +192,10 @@ export default function NotebookPage() {
         query,
         datasourceId,
         datasource,
-        conversationId: notebookConversation.data?.id, // Pass conversationId for DuckDB execution (Google Sheets)
+        conversationId: notebookConversation.data?.slug, // Pass conversationSlug for DuckDB execution (Google Sheets)
       });
     },
-    [savedDatasources.data, runQueryMutation, notebookConversation.data?.id],
+    [savedDatasources.data, runQueryMutation, notebookConversation.data?.slug],
   );
 
   // Run query with agent mutation
@@ -226,6 +226,14 @@ export default function NotebookPage() {
       const shouldPaste = result.shouldPaste === true && result.sqlQuery;
 
       if (shouldPaste && result.sqlQuery) {
+        // Guard against unmount: check if notebook still exists
+        if (!normalizedNotebook || !normalizedNotebook.cells) {
+          console.warn(
+            '[Notebook] Cannot paste SQL: notebook unmounted or cells unavailable',
+          );
+          return;
+        }
+
         console.log('[Notebook] Pasting SQL to notebook cell:', {
           cellId,
           cellType,
@@ -236,7 +244,7 @@ export default function NotebookPage() {
           // Code cell: paste SQL directly
           console.log('[Notebook] Pasting SQL to existing code cell:', cellId);
           handleCellsChange(
-            normalizedNotebook!.cells.map((c) =>
+            normalizedNotebook.cells.map((c) =>
               c.cellId === cellId ? { ...c, query: result.sqlQuery! } : c,
             ),
           );
@@ -246,7 +254,7 @@ export default function NotebookPage() {
         } else if (cellType === NOTEBOOK_CELL_TYPE.PROMPT) {
           // Prompt cell: create new code cell with SQL
           const maxCellId = Math.max(
-            ...normalizedNotebook!.cells.map((c) => c.cellId),
+            ...normalizedNotebook.cells.map((c) => c.cellId),
             0,
           );
           const newCellId = maxCellId + 1;
@@ -259,7 +267,7 @@ export default function NotebookPage() {
             isActive: true,
             runMode: 'default',
           };
-          handleCellsChange([...normalizedNotebook!.cells, newCodeCell]);
+          handleCellsChange([...normalizedNotebook.cells, newCodeCell]);
           // Simulate click to run query on the new cell
           console.log('[Notebook] Auto-running query on new cell');
           handleRunQuery(newCellId, result.sqlQuery, datasourceId);

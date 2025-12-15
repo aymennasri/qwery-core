@@ -38,7 +38,7 @@ export const detectIntent = async (text: string) => {
           intent: 'other' as const,
           complexity: intentObject.complexity,
           needsChart: intentObject.needsChart ?? false,
-          needsSQL: intentObject.needsSQL,
+          needsSQL: intentObject.needsSQL ?? false,
         };
       }
 
