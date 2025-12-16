@@ -27,7 +27,7 @@ import type { DatasourceItem } from '@qwery/ui/ai';
 import { useGetConversationBySlug } from '~/lib/queries/use-get-conversations';
 import { useUpdateConversation } from '~/lib/mutations/use-conversation';
 import { useNotebookSidebar } from '~/lib/context/notebook-sidebar-context';
-import { PROMPT_SOURCE } from '@qwery/agent-factory-sdk';
+import { PROMPT_SOURCE, NOTEBOOK_CELL_TYPE } from '@qwery/agent-factory-sdk';
 import { useAgentStatus } from '@qwery/ui/ai';
 
 type SendMessageFn = (
@@ -304,6 +304,14 @@ export const AgentUIWrapper = forwardRef<
           const currentCellDs = getCellDatasource();
           // Get notebookCellType BEFORE clearing it
           const currentNotebookCellType = getNotebookCellType();
+          const currentCellId = getCellId();
+
+          console.log('[AgentUIWrapper] sendMessage called with context:', {
+            currentCellDs,
+            currentNotebookCellType,
+            currentCellId,
+            textPreview: text.substring(0, 50),
+          });
 
           // Determine datasources to use - prioritize cellDatasource
           const datasourcesToUse = currentCellDs
@@ -370,32 +378,46 @@ export const AgentUIWrapper = forwardRef<
           if (datasourcesToUse && datasourcesToUse.length > 0) {
             messageMetadata.datasources = datasourcesToUse;
           }
-          if (currentNotebookCellType) {
+
+          const hasNotebookContext =
+            currentCellDs ||
+            currentNotebookCellType ||
+            currentCellId !== undefined;
+
+          if (hasNotebookContext) {
             messageMetadata.promptSource = PROMPT_SOURCE.INLINE;
-            messageMetadata.notebookCellType = currentNotebookCellType;
+            // Always include notebookCellType if we have notebook context
+            // Default to 'prompt' if not explicitly set (for paste button visibility)
+            messageMetadata.notebookCellType =
+              currentNotebookCellType || NOTEBOOK_CELL_TYPE.PROMPT;
             console.log(
               '[AgentUIWrapper] Preparing message with notebook context:',
               {
                 promptSource: PROMPT_SOURCE.INLINE,
-                notebookCellType: currentNotebookCellType,
+                notebookCellType: messageMetadata.notebookCellType,
+                cellId: currentCellId,
+                cellDatasource: currentCellDs,
                 textPreview: text.substring(0, 50),
               },
             );
 
             // Capture notebook context in state when sending message
             // This ensures context is available when tool output arrives
-            const cellId = getCellId();
-            if (
-              cellId !== undefined &&
-              currentNotebookCellType &&
-              currentCellDs
-            ) {
+            // Always set context if we have notebook indicators (for paste button visibility)
+            if (currentCellId !== undefined && currentCellDs) {
               setNotebookContextState({
-                cellId,
-                notebookCellType: currentNotebookCellType as 'query' | 'prompt',
+                cellId: currentCellId,
+                notebookCellType: (currentNotebookCellType ||
+                  NOTEBOOK_CELL_TYPE.PROMPT) as 'query' | 'prompt',
                 datasourceId: currentCellDs,
               });
             }
+          } else {
+            console.log('[AgentUIWrapper] No notebook context detected:', {
+              currentCellDs,
+              currentNotebookCellType,
+              currentCellId,
+            });
           }
 
           // Don't clear context immediately - keep it for paste functionality
@@ -553,10 +575,12 @@ export const AgentUIWrapper = forwardRef<
     const notebookCellType = getNotebookCellType();
     const datasourceId = getCellDatasource();
 
-    if (cellId !== undefined && notebookCellType && datasourceId) {
+    if (cellId !== undefined && datasourceId) {
       const newContext = {
         cellId,
-        notebookCellType: notebookCellType as 'query' | 'prompt',
+        notebookCellType: (notebookCellType || NOTEBOOK_CELL_TYPE.PROMPT) as
+          | 'query'
+          | 'prompt',
         datasourceId,
       };
       requestAnimationFrame(() => {
@@ -566,7 +590,7 @@ export const AgentUIWrapper = forwardRef<
       // Don't clear immediately - keep it for a bit in case tool output arrives
       // Only clear if all values are gone (user navigated away)
       // Use a timeout to keep context for a reasonable time (30 seconds)
-      if (cellId === undefined && !notebookCellType && !datasourceId) {
+      if (cellId === undefined && !datasourceId) {
         const timeoutId = setTimeout(() => {
           setNotebookContextState(undefined);
         }, 30000); // Keep for 30 seconds

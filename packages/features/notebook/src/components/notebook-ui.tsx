@@ -374,8 +374,8 @@ function FullViewDialog({
             <div className="overflow-hidden rounded-md border">
               <div className="h-[60vh] min-h-[400px] p-4">
                 <DataGrid
-                  columns={result.headers.map((header) => header.name)}
-                  rows={result.rows}
+                  columns={result.columns?.map((col) => col.name) ?? []}
+                  rows={result.rows ?? []}
                   pageSize={50}
                 />
               </div>

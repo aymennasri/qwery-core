@@ -115,6 +115,7 @@ export function useSuggestionEnhancement({
       }
       cleanupFunctions.forEach((cleanup) => cleanup());
       // Copy ref value to avoid accessing ref in cleanup
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       const processedElements = processedElementsRef.current;
       if (processedElements) {
         processedElements.clear();

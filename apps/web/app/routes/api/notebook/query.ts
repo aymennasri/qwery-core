@@ -10,44 +10,6 @@ import { handleDomainException } from '~/lib/utils/error-handler';
 
 const repositories = await createRepositories();
 
-function getWorkspace(): string {
-  const globalProcess =
-    typeof globalThis !== 'undefined'
-      ? (globalThis as { process?: NodeJS.Process }).process
-      : undefined;
-  const envValue =
-    globalProcess?.env?.WORKSPACE ??
-    globalProcess?.env?.VITE_WORKING_DIR ??
-    globalProcess?.env?.WORKING_DIR;
-  if (!envValue) {
-    throw new Error('WORKSPACE environment variable is not set');
-  }
-  return envValue;
-}
-
-/**
- * Recursively converts BigInt values to numbers for JSON serialization
- */
-const convertBigInt = (value: unknown): unknown => {
-  if (typeof value === 'bigint') {
-    if (value <= Number.MAX_SAFE_INTEGER && value >= Number.MIN_SAFE_INTEGER) {
-      return Number(value);
-    }
-    return value.toString();
-  }
-  if (Array.isArray(value)) {
-    return value.map(convertBigInt);
-  }
-  if (value && typeof value === 'object') {
-    const converted: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(value)) {
-      converted[key] = convertBigInt(val);
-    }
-    return converted;
-  }
-  return value;
-};
-
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return new Response('Method not allowed', { status: 405 });
@@ -65,8 +27,6 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 400 },
       );
     }
-
-    const workspace = getWorkspace();
 
     // Load datasource to get its name and verify it exists
     const datasource = await repositories.datasource.findById(datasourceId);

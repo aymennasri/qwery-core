@@ -767,8 +767,8 @@ function NotebookCellComponent({
           {isQueryCell && result && !isCollapsed && (
             <div className="border-border h-[400px] min-h-[400px] border-t p-4">
               <DataGrid
-                columns={result.headers.map((header) => header.name)}
-                rows={result.rows}
+                columns={result.columns?.map((col) => col.name) ?? []}
+                rows={result.rows ?? []}
                 pageSize={50}
               />
             </div>

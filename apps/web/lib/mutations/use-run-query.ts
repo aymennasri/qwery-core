@@ -69,10 +69,21 @@ export function useRunQuery(
         // Ensure rows and headers are arrays
         const rows = Array.isArray(result.rows) ? result.rows : [];
         const headers = Array.isArray(result.headers) ? result.headers : [];
+        const columns = headers.map(
+          (header: {
+            name: string;
+            displayName?: string;
+            originalType?: string | null;
+          }) => ({
+            name: header.name,
+            displayName: header.displayName ?? header.name,
+            originalType: header.originalType ?? null,
+          }),
+        );
 
         return {
           rows,
-          headers,
+          columns,
           stat: result.stat ?? {
             rowsAffected: 0,
             rowsRead: rows.length,

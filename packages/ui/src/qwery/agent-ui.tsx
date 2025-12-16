@@ -93,7 +93,7 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
     models,
     onOpen,
     usage,
-    emitFinish,
+    emitFinish: _emitFinish,
     datasources,
     selectedDatasources,
     onDatasourceSelectionChange,
@@ -496,20 +496,6 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
 
     prevViewSheetCountRef.current = currentCount;
   }, [messages, status]);
-
-  // Compute regen counts for all messages to avoid ref access during render
-  const [regenCountsMap, setRegenCountsMap] = useState<Map<string, number>>(
-    new Map(),
-  );
-
-  useEffect(() => {
-    const counts = new Map<string, number>();
-    messages.forEach((msg) => {
-      counts.set(msg.id, 0);
-    });
-    // Use setTimeout to avoid synchronous setState in effect
-    setTimeout(() => setRegenCountsMap(counts), 0);
-  }, [messages]);
 
   return (
     <PromptInputProvider initialInput={state.input}>

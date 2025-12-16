@@ -118,12 +118,36 @@ export function NotebookSidebarProvider({ children }: { children: ReactNode }) {
       // 1. Sidebar is fully open and rendered
       // 2. AgentUIWrapper has mounted and can access cellDatasource
       // 3. Datasource is set before message is sent
+      // 4. Notebook context (cellType, cellId) is set before message is sent
       requestAnimationFrame(() => {
         setTimeout(() => {
-          // Double-check datasource is still set (in case it was cleared)
+          // Double-check all context values are still set (in case they were cleared)
           if (datasourceId && cellDatasourceRef.current !== datasourceId) {
             cellDatasourceRef.current = datasourceId;
           }
+          if (
+            options?.notebookCellType &&
+            notebookCellTypeRef.current !== options.notebookCellType
+          ) {
+            notebookCellTypeRef.current = options.notebookCellType;
+          }
+          if (
+            options?.cellId !== undefined &&
+            cellIdRef.current !== options.cellId
+          ) {
+            cellIdRef.current = options.cellId;
+          }
+
+          console.log(
+            '[NotebookSidebarContext] Sending message with context:',
+            {
+              datasourceId: cellDatasourceRef.current,
+              notebookCellType: notebookCellTypeRef.current,
+              cellId: cellIdRef.current,
+              messagePreview: messageToSend?.substring(0, 50),
+            },
+          );
+
           if (messageToSend) {
             sidebarControlRef.current?.sendMessage?.(messageToSend);
           }

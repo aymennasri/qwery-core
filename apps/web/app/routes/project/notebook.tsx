@@ -211,10 +211,16 @@ export default function NotebookPage() {
     (result, cellId, datasourceId) => {
       const cell = normalizedNotebook?.cells.find((c) => c.cellId === cellId);
       const cellType = cell?.cellType;
+      const notebookCellType: NotebookCellType | undefined =
+        cellType === NOTEBOOK_CELL_TYPE.QUERY ||
+        cellType === NOTEBOOK_CELL_TYPE.PROMPT
+          ? (cellType as NotebookCellType)
+          : undefined;
 
       console.log('[Notebook] runQueryWithAgent success callback:', {
         cellId,
         cellType,
+        notebookCellType,
         hasSql: result.hasSql,
         needSQL: result.needSQL,
         shouldPaste: result.shouldPaste,
@@ -237,6 +243,7 @@ export default function NotebookPage() {
         console.log('[Notebook] Pasting SQL to notebook cell:', {
           cellId,
           cellType,
+          notebookCellType,
           sqlPreview: result.sqlQuery.substring(0, 100),
         });
         // Inline mode with SQL: paste SQL into notebook cell
@@ -281,9 +288,12 @@ export default function NotebookPage() {
         const query = cell?.query || '';
 
         // Open sidebar and send message through chat interface for proper streaming
+        // Pass cellType and cellId so the chat API can set notebookCellType in metadata
         openSidebar(result.conversationSlug, {
           datasourceId,
           messageToSend: query, // Send the message through chat interface for streaming
+          notebookCellType,
+          cellId,
         });
       }
       setLoadingCellId(null);
@@ -320,8 +330,23 @@ export default function NotebookPage() {
       datasourceName: datasourceId,
     });
 
-    // For chat path, get/create conversation and send through chat interface for streaming
-    // For SQL detection, we'll check after streaming completes
+    // Determine cellType from the actual cell if not provided
+    // This ensures we always have a cellType when opening the sidebar
+    const cell = normalizedNotebook?.cells.find((c) => c.cellId === cellId);
+    const actualCellType: NotebookCellType =
+      cellType ||
+      (cell?.cellType === NOTEBOOK_CELL_TYPE.QUERY ||
+      cell?.cellType === NOTEBOOK_CELL_TYPE.PROMPT
+        ? (cell.cellType as NotebookCellType)
+        : NOTEBOOK_CELL_TYPE.PROMPT); // Default to 'prompt' if cellType is not 'query' or 'prompt'
+
+    console.log('[Notebook] handleRunQueryWithAgent called:', {
+      cellId,
+      providedCellType: cellType,
+      actualCellType,
+      cellCellType: cell?.cellType,
+    });
+
     if (notebook.data?.id) {
       // Get or create conversation for this notebook
       let conversationSlug: string;
@@ -367,10 +392,11 @@ export default function NotebookPage() {
 
       // Open sidebar and send message through chat interface for proper streaming
       // Pass cellType and cellId so the chat API can set notebookCellType in metadata
+      // Always pass actualCellType to ensure it's never undefined
       openSidebar(conversationSlug, {
         datasourceId,
         messageToSend: query, // This will be sent through chat interface and stream properly
-        notebookCellType: cellType, // Pass cellType to distinguish code cell vs prompt cell
+        notebookCellType: actualCellType, // Always pass cellType (either 'query' or 'prompt')
         cellId, // Pass cellId to track which cell is loading
       });
 
