@@ -21,8 +21,6 @@ import {
   Edit,
   Trash2,
   Loader2,
-  ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
 import {
   AlertDialog,

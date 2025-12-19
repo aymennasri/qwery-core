@@ -19,8 +19,6 @@ import {
   AlignLeft,
   ArrowDown,
   ArrowUp,
-  ChevronDown,
-  ChevronRight,
   Copy,
   DatabaseIcon,
   GripVertical,
@@ -122,7 +120,7 @@ function NotebookCellComponent({
   isLoading = false,
   onMoveUp,
   onMoveDown,
-  onDuplicate,
+  onDuplicate: _onDuplicate,
   onFormat,
   onDelete,
   onFullView,
@@ -356,7 +354,7 @@ function NotebookCellComponent({
             {initials}
           </span>
         )}
-        <span className="text-[11px] truncate">{displayName}</span>
+        <span className="truncate text-[11px]">{displayName}</span>
       </div>
     );
   }, []);
@@ -411,16 +409,22 @@ function NotebookCellComponent({
         'group relative flex w-full min-w-0 flex-col rounded-xl border transition-all duration-200',
         isDragging && 'opacity-50',
         // Cell type specific styling
-        isTextCell && 'border-transparent shadow-none hover:border-transparent bg-transparent',
-        isPromptCell && 'border-dashed border-2 border-border/60 bg-muted/20 hover:border-border/70',
-        isQueryCell && 'dark:border-white/30 border-black/20 shadow-sm dark:hover:border-white/40 hover:border-black/30 hover:shadow-md',
-        !isTextCell && !isPromptCell && !isQueryCell && 'hover:border-border/80 hover:shadow-sm',
+        isTextCell &&
+          'border-transparent bg-transparent shadow-none hover:border-transparent',
+        isPromptCell &&
+          'border-border/60 bg-muted/20 hover:border-border/70 border-2 border-dashed',
+        isQueryCell &&
+          'border-black/20 shadow-sm hover:border-black/30 hover:shadow-md dark:border-white/30 dark:hover:border-white/40',
+        !isTextCell &&
+          !isPromptCell &&
+          !isQueryCell &&
+          'hover:border-border/80 hover:shadow-sm',
       )}
     >
       {/* Absolute Drag handle - visible only on hover */}
       <button
         type="button"
-        className="text-muted-foreground/30 hover:text-foreground absolute -left-8 top-4 opacity-0 transition-all duration-200 group-hover:opacity-100 cursor-grab active:cursor-grabbing bg-transparent border-0 p-0"
+        className="text-muted-foreground/30 hover:text-foreground absolute top-4 -left-8 cursor-grab border-0 bg-transparent p-0 opacity-0 transition-all duration-200 group-hover:opacity-100 active:cursor-grabbing"
         ref={dragHandleRef}
         {...dragHandleProps}
       >
@@ -428,12 +432,14 @@ function NotebookCellComponent({
       </button>
 
       {/* Cell content */}
-      <div className={cn(
-        'relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl',
-        isTextCell ? 'bg-transparent min-h-[180px]' : 'bg-background',
-        isQueryCell && 'min-h-[220px]',
-        isPromptCell && 'min-h-[200px]',
-      )}>
+      <div
+        className={cn(
+          'relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl',
+          isTextCell ? 'min-h-[180px] bg-transparent' : 'bg-background',
+          isQueryCell && 'min-h-[220px]',
+          isPromptCell && 'min-h-[200px]',
+        )}
+      >
         {/* Editor Area */}
         <div
           ref={editorContainerRef}
@@ -446,7 +452,7 @@ function NotebookCellComponent({
                 size="sm"
                 onClick={handleRunQuery}
                 disabled={!query.trim() || isLoading || !selectedDatasource}
-                className="absolute top-3 right-3 z-10 h-7 gap-1.5 px-2 text-xs font-semibold text-black bg-[#ffcb51] hover:bg-[#ffcb51]/90 transition-all disabled:opacity-50 shadow-sm"
+                className="absolute top-3 right-3 z-10 h-7 gap-1.5 bg-[#ffcb51] px-2 text-xs font-semibold text-black shadow-sm transition-all hover:bg-[#ffcb51]/90 disabled:opacity-50"
               >
                 {isLoading ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -469,7 +475,7 @@ function NotebookCellComponent({
                   dropCursor: false,
                   allowMultipleSelections: false,
                 }}
-                className="[&_.cm-scroller::-webkit-scrollbar-thumb]:bg-muted-foreground/30 [&_.cm-scroller::-webkit-scrollbar-thumb]:hover:bg-muted-foreground/50 flex-1 [&_.cm-content]:px-4 [&_.cm-content]:pr-12 [&_.cm-content]:py-4 [&_.cm-editor]:h-full [&_.cm-editor]:bg-transparent [&_.cm-scroller]:font-mono [&_.cm-scroller]:text-sm [&_.cm-scroller::-webkit-scrollbar]:w-2 [&_.cm-scroller::-webkit-scrollbar-thumb]:rounded-full [&_.cm-scroller::-webkit-scrollbar-track]:bg-transparent"
+                className="[&_.cm-scroller::-webkit-scrollbar-thumb]:bg-muted-foreground/30 [&_.cm-scroller::-webkit-scrollbar-thumb]:hover:bg-muted-foreground/50 flex-1 [&_.cm-content]:px-4 [&_.cm-content]:py-4 [&_.cm-content]:pr-12 [&_.cm-editor]:h-full [&_.cm-editor]:bg-transparent [&_.cm-scroller]:font-mono [&_.cm-scroller]:text-sm [&_.cm-scroller::-webkit-scrollbar]:w-2 [&_.cm-scroller::-webkit-scrollbar-thumb]:rounded-full [&_.cm-scroller::-webkit-scrollbar-track]:bg-transparent"
                 data-test="notebook-sql-editor"
                 placeholder={
                   showAIPopup
@@ -511,7 +517,7 @@ function NotebookCellComponent({
             <div className="relative flex h-full flex-col">
               <Button
                 size="sm"
-                className="absolute top-3 right-3 z-10 h-7 gap-1.5 px-2 text-xs font-semibold text-black bg-[#ffcb51] hover:bg-[#ffcb51]/90 transition-all opacity-0 group-hover:opacity-100 shadow-sm"
+                className="absolute top-3 right-3 z-10 h-7 gap-1.5 bg-[#ffcb51] px-2 text-xs font-semibold text-black opacity-0 shadow-sm transition-all group-hover:opacity-100 hover:bg-[#ffcb51]/90"
                 onClick={() =>
                   setMarkdownView((prev) =>
                     prev === 'preview' ? 'edit' : 'preview',
@@ -531,11 +537,11 @@ function NotebookCellComponent({
                 )}
               </Button>
               {markdownView === 'edit' ? (
-                <div className="flex flex-1 flex-col min-h-0">
+                <div className="flex min-h-0 flex-1 flex-col">
                   {/* Preview on top when editing */}
                   <div
                     ref={markdownPreviewRef}
-                    className="border-border bg-muted/30 flex-1 flex-shrink-0 min-h-0 overflow-auto border-b px-4 pr-12 py-4 markdown-preview-scroll"
+                    className="border-border bg-muted/30 markdown-preview-scroll min-h-0 flex-1 flex-shrink-0 overflow-auto border-b px-4 py-4 pr-12"
                     onScroll={(e) => {
                       if (isScrollingRef.current) return;
                       const editor = textareaRef.current;
@@ -550,7 +556,10 @@ function NotebookCellComponent({
                           );
                         editor.scrollTop =
                           previewScrollRatio *
-                          Math.max(1, editor.scrollHeight - editor.clientHeight);
+                          Math.max(
+                            1,
+                            editor.scrollHeight - editor.clientHeight,
+                          );
                         requestAnimationFrame(() => {
                           isScrollingRef.current = false;
                         });
@@ -569,13 +578,13 @@ function NotebookCellComponent({
                     </div>
                   </div>
                   {/* Editor below - fills remaining space */}
-                  <div className="bg-muted/5 flex-1 flex-shrink-0 min-h-0 overflow-hidden">
+                  <div className="bg-muted/5 min-h-0 flex-1 flex-shrink-0 overflow-hidden">
                     <Textarea
                       ref={textareaRef}
                       value={query}
                       onChange={(e) => handleQueryChange(e.target.value)}
                       disabled={isLoading}
-                      className="h-full w-full resize-none border-0 bg-transparent px-4 pr-12 py-4 text-sm leading-6 focus-visible:ring-0 overflow-y-auto markdown-editor-scroll"
+                      className="markdown-editor-scroll h-full w-full resize-none overflow-y-auto border-0 bg-transparent px-4 py-4 pr-12 text-sm leading-6 focus-visible:ring-0"
                       onScroll={(e) => {
                         if (isScrollingRef.current) return;
                         const preview = markdownPreviewRef.current;
@@ -608,7 +617,7 @@ function NotebookCellComponent({
                 </div>
               ) : (
                 <div
-                  className="bg-muted/30 [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30 [&::-webkit-scrollbar-thumb]:hover:bg-muted-foreground/50 flex-1 overflow-auto px-4 pr-12 py-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent"
+                  className="bg-muted/30 [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30 [&::-webkit-scrollbar-thumb]:hover:bg-muted-foreground/50 flex-1 overflow-auto px-4 py-4 pr-12 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent"
                   onDoubleClick={handleMarkdownDoubleClick}
                   ref={markdownPreviewRef}
                   data-test="notebook-md-preview"
@@ -632,7 +641,7 @@ function NotebookCellComponent({
                 size="sm"
                 onClick={handlePromptSubmit}
                 disabled={!query.trim() || isLoading}
-                className="absolute top-3 right-3 z-10 h-7 gap-1.5 px-2 text-xs font-semibold text-black bg-[#ffcb51] hover:bg-[#ffcb51]/90 transition-all disabled:opacity-50 shadow-sm"
+                className="absolute top-3 right-3 z-10 h-7 gap-1.5 bg-[#ffcb51] px-2 text-xs font-semibold text-black shadow-sm transition-all hover:bg-[#ffcb51]/90 disabled:opacity-50"
               >
                 {isLoading ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -643,7 +652,7 @@ function NotebookCellComponent({
                   </>
                 )}
               </Button>
-              <div className="bg-muted/10 flex-1 px-4 pr-12 py-4">
+              <div className="bg-muted/10 flex-1 px-4 py-4 pr-12">
                 <Textarea
                   ref={textareaRef}
                   value={query}
@@ -667,16 +676,20 @@ function NotebookCellComponent({
         </div>
 
         {/* Bottom Toolbar - As seen in screenshot */}
-        <div className={cn(
-          'border-border bg-background flex items-center justify-between border-t px-2 pb-2 pt-2 transition-all duration-200',
-          isTextCell && markdownView === 'preview' && 'h-0 opacity-0 overflow-hidden group-hover:h-10 group-hover:opacity-100',
-          !isTextCell || markdownView === 'edit' ? 'h-10' : '',
-        )}>
+        <div
+          className={cn(
+            'border-border bg-background flex items-center justify-between border-t px-2 pt-2 pb-2 transition-all duration-200',
+            isTextCell &&
+              markdownView === 'preview' &&
+              'h-0 overflow-hidden opacity-0 group-hover:h-10 group-hover:opacity-100',
+            !isTextCell || markdownView === 'edit' ? 'h-10' : '',
+          )}
+        >
           <div className="flex items-center gap-1">
             <Button
               size="icon"
               variant="ghost"
-              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground hover:text-foreground h-8 w-8"
               onClick={onFormat}
               aria-label="Format cell"
             >
@@ -685,7 +698,7 @@ function NotebookCellComponent({
             <Button
               size="icon"
               variant="ghost"
-              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground hover:text-foreground h-8 w-8"
               onClick={() => {
                 navigator.clipboard.writeText(query);
               }}
@@ -696,7 +709,7 @@ function NotebookCellComponent({
             <Button
               size="icon"
               variant="ghost"
-              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              className="text-muted-foreground hover:text-destructive h-8 w-8"
               onClick={onDelete}
               aria-label="Delete cell"
             >
@@ -708,7 +721,7 @@ function NotebookCellComponent({
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-8 w-8 text-muted-foreground"
+                  className="text-muted-foreground h-8 w-8"
                 >
                   <MoreVertical className="h-4 w-4" />
                 </Button>
@@ -737,7 +750,7 @@ function NotebookCellComponent({
                 onValueChange={(value) => onDatasourceChange(value)}
                 disabled={datasources.length === 0}
               >
-                <SelectTrigger className="border-none bg-transparent hover:bg-accent h-7 w-auto min-w-[120px] shadow-none text-[11px] font-medium text-muted-foreground">
+                <SelectTrigger className="hover:bg-accent text-muted-foreground h-7 w-auto min-w-[120px] border-none bg-transparent text-[11px] font-medium shadow-none">
                   <DatabaseIcon className="mr-1.5 h-3 w-3" />
                   <SelectValue placeholder="Select datasource" />
                 </SelectTrigger>
@@ -769,7 +782,7 @@ function NotebookCellComponent({
           <div className="border-border border-t">
             <Alert
               variant="destructive"
-              className="m-2 rounded-lg border-none bg-destructive/10"
+              className="bg-destructive/10 m-2 rounded-lg border-none"
             >
               <AlertCircle className="h-4 w-4" />
               <AlertDescription className="font-mono text-xs">

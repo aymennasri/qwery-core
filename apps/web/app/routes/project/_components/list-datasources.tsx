@@ -31,7 +31,6 @@ import type { Datasource } from '@qwery/domain/entities';
 import { getAllExtensionMetadata } from '@qwery/extensions-loader';
 import { Button } from '@qwery/ui/button';
 import { Input } from '@qwery/ui/input';
-import { Kbd, KbdGroup } from '@qwery/ui/kbd';
 import { Trans } from '@qwery/ui/trans';
 import { DatasourceCard } from '@qwery/ui/qwery/datasource';
 import { Switch } from '@qwery/ui/switch';
@@ -68,15 +67,13 @@ export function ListDatasources({
 }) {
   const navigate = useNavigate();
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const isMac = useMemo(
-    () => navigator.platform.toUpperCase().indexOf('MAC') >= 0,
-    [],
-  );
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [isGridView, setIsGridView] = useState(true);
   const [groupByProvider, setGroupByProvider] = useState(false);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
+    new Set(),
+  );
   const [sortCriterion, setSortCriterion] = useState<SortCriterion>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [shouldAnimate, setShouldAnimate] = useState(false);
@@ -212,13 +209,13 @@ export function ListDatasources({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="shrink-0 flex flex-col gap-6 p-6 lg:p-10 pb-4">
+      <div className="flex shrink-0 flex-col gap-6 p-6 pb-4 lg:p-10">
         <h1 className="text-3xl font-bold">
           <Trans
             i18nKey="datasources:list_title"
             defaults="Saved Datasources"
           />
-        </h1>                                                                                                                                                                                                                                                                                                                                                                                                       
+        </h1>
 
         <div className="flex items-center gap-3">
           <div className="relative flex-1">
@@ -228,7 +225,7 @@ export function ListDatasources({
               type="search"
               placeholder="Search datasources..."
               className={cn(
-                'pl-9 pr-24 transition-all w-full h-11',
+                'h-11 w-full pr-24 pl-9 transition-all',
                 shouldAnimate &&
                   'ring-primary animate-pulse ring-2 ring-offset-2',
               )}
@@ -241,24 +238,24 @@ export function ListDatasources({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-9 gap-2 px-3 border-none hover:bg-accent/50 focus-visible:ring-0"
+                    className="hover:bg-accent/50 h-9 gap-2 border-none px-3 focus-visible:ring-0"
                   >
-                    <Settings2 className="h-4 w-4 text-muted-foreground/60" />
-                    <span className="text-xs font-medium text-muted-foreground/60">
+                    <Settings2 className="text-muted-foreground/60 h-4 w-4" />
+                    <span className="text-muted-foreground/60 text-xs font-medium">
                       Options
                     </span>
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-80">
-                  <DropdownMenuLabel className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/30">
+                  <DropdownMenuLabel className="text-muted-foreground/30 px-2 py-1.5 text-[10px] font-bold tracking-widest uppercase">
                     Display Mode
                   </DropdownMenuLabel>
                   <DropdownMenuItem
                     onClick={() => setIsGridView(true)}
                     className={cn(
-                      'flex items-center justify-between cursor-pointer py-2.5 px-3',
+                      'flex cursor-pointer items-center justify-between px-3 py-2.5',
                       isGridView &&
-                        'bg-[#ffcb51]/10 text-foreground font-medium',
+                        'text-foreground bg-[#ffcb51]/10 font-medium',
                     )}
                   >
                     <div className="flex items-center gap-2.5">
@@ -277,9 +274,9 @@ export function ListDatasources({
                   <DropdownMenuItem
                     onClick={() => setIsGridView(false)}
                     className={cn(
-                      'flex items-center justify-between cursor-pointer py-2.5 px-3',
+                      'flex cursor-pointer items-center justify-between px-3 py-2.5',
                       !isGridView &&
-                        'bg-[#ffcb51]/10 text-foreground font-medium',
+                        'text-foreground bg-[#ffcb51]/10 font-medium',
                     )}
                   >
                     <div className="flex items-center gap-2.5">
@@ -293,20 +290,22 @@ export function ListDatasources({
                       />
                       <span className="text-sm">Table</span>
                     </div>
-                    {!isGridView && <Check className="h-4 w-4 text-[#ffcb51]" />}
+                    {!isGridView && (
+                      <Check className="h-4 w-4 text-[#ffcb51]" />
+                    )}
                   </DropdownMenuItem>
 
                   <DropdownMenuSeparator className="my-1" />
 
-                  <DropdownMenuLabel className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/30">
+                  <DropdownMenuLabel className="text-muted-foreground/30 px-2 py-1.5 text-[10px] font-bold tracking-widest uppercase">
                     Group By
                   </DropdownMenuLabel>
                   <DropdownMenuItem
                     onClick={() => setGroupByProvider(!groupByProvider)}
                     className={cn(
-                      'flex items-center justify-between cursor-pointer py-2.5 px-3',
+                      'flex cursor-pointer items-center justify-between px-3 py-2.5',
                       groupByProvider &&
-                        'bg-[#ffcb51]/10 text-foreground font-medium',
+                        'text-foreground bg-[#ffcb51]/10 font-medium',
                     )}
                   >
                     <div className="flex items-center gap-2.5">
@@ -327,15 +326,15 @@ export function ListDatasources({
 
                   <DropdownMenuSeparator className="my-1" />
 
-                  <DropdownMenuLabel className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/30">
+                  <DropdownMenuLabel className="text-muted-foreground/30 px-2 py-1.5 text-[10px] font-bold tracking-widest uppercase">
                     Sort By
                   </DropdownMenuLabel>
                   <DropdownMenuItem
                     onClick={() => handleSortClick('date')}
                     className={cn(
-                      'flex items-center justify-between cursor-pointer py-2.5 px-3',
+                      'flex cursor-pointer items-center justify-between px-3 py-2.5',
                       sortCriterion === 'date' &&
-                        'bg-[#ffcb51]/10 text-foreground font-medium',
+                        'text-foreground bg-[#ffcb51]/10 font-medium',
                     )}
                   >
                     <div className="flex items-center gap-2.5">
@@ -358,7 +357,7 @@ export function ListDatasources({
                           className={cn(
                             'text-[10px]',
                             sortOrder === 'asc'
-                              ? 'text-[#ffcb51] font-bold'
+                              ? 'font-bold text-[#ffcb51]'
                               : 'text-muted-foreground/40',
                           )}
                         >
@@ -373,7 +372,7 @@ export function ListDatasources({
                           className={cn(
                             'text-[10px]',
                             sortOrder === 'desc'
-                              ? 'text-[#ffcb51] font-bold'
+                              ? 'font-bold text-[#ffcb51]'
                               : 'text-muted-foreground/40',
                           )}
                         >
@@ -385,9 +384,9 @@ export function ListDatasources({
                   <DropdownMenuItem
                     onClick={() => handleSortClick('name')}
                     className={cn(
-                      'flex items-center justify-between cursor-pointer py-2.5 px-3',
+                      'flex cursor-pointer items-center justify-between px-3 py-2.5',
                       sortCriterion === 'name' &&
-                        'bg-[#ffcb51]/10 text-foreground font-medium',
+                        'text-foreground bg-[#ffcb51]/10 font-medium',
                     )}
                   >
                     <div className="flex items-center gap-2.5">
@@ -410,7 +409,7 @@ export function ListDatasources({
                           className={cn(
                             'text-[10px]',
                             sortOrder === 'asc'
-                              ? 'text-[#ffcb51] font-bold'
+                              ? 'font-bold text-[#ffcb51]'
                               : 'text-muted-foreground/40',
                           )}
                         >
@@ -425,7 +424,7 @@ export function ListDatasources({
                           className={cn(
                             'text-[10px]',
                             sortOrder === 'desc'
-                              ? 'text-[#ffcb51] font-bold'
+                              ? 'font-bold text-[#ffcb51]'
                               : 'text-muted-foreground/40',
                           )}
                         >
@@ -440,7 +439,7 @@ export function ListDatasources({
           </div>
           <Button
             asChild
-            className="h-11 bg-[#ffcb51] text-black hover:bg-[#ffcb51]/90 font-bold px-5"
+            className="h-11 bg-[#ffcb51] px-5 font-bold text-black hover:bg-[#ffcb51]/90"
           >
             <Link
               to={createPath(
@@ -455,7 +454,7 @@ export function ListDatasources({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto min-h-0 px-10 py-0">
+      <div className="min-h-0 flex-1 overflow-y-auto px-10 py-0">
         {filteredDatasources.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <p className="text-foreground mb-2 text-base font-medium">
@@ -475,15 +474,15 @@ export function ListDatasources({
                 <div key={provider} className="space-y-4">
                   <button
                     onClick={() => toggleGroupCollapse(provider)}
-                    className="flex w-full items-center gap-2 rounded-md p-2 transition-colors hover:bg-muted/50"
+                    className="hover:bg-muted/50 flex w-full items-center gap-2 rounded-md p-2 transition-colors"
                   >
                     {isCollapsed ? (
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      <ChevronRight className="text-muted-foreground h-4 w-4" />
                     ) : (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      <ChevronDown className="text-muted-foreground h-4 w-4" />
                     )}
                     <div className="flex items-center gap-2">
-                      <div className="flex h-6 w-6 items-center justify-center rounded border bg-muted/50 p-1">
+                      <div className="bg-muted/50 flex h-6 w-6 items-center justify-center rounded border p-1">
                         {pluginLogoMap.has(provider) ? (
                           <img
                             src={pluginLogoMap.get(provider)}
@@ -491,14 +490,14 @@ export function ListDatasources({
                             className="h-full w-full object-contain"
                           />
                         ) : (
-                          <div className="h-2 w-2 bg-muted-foreground/20 rounded" />
+                          <div className="bg-muted-foreground/20 h-2 w-2 rounded" />
                         )}
                       </div>
-                      <h3 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">
+                      <h3 className="text-muted-foreground text-sm font-semibold tracking-wide uppercase">
                         {provider} ({items.length})
                       </h3>
                     </div>
-                    <div className="h-px flex-1 bg-border" />
+                    <div className="bg-border h-px flex-1" />
                   </button>
 
                   {!isCollapsed &&
@@ -538,11 +537,11 @@ export function ListDatasources({
                         })}
                       </div>
                     ) : (
-                      <div className="rounded-xl border bg-card overflow-hidden">
+                      <div className="bg-card overflow-hidden rounded-xl border">
                         <Table>
                           <TableHeader>
                             <TableRow className="bg-muted/50 hover:bg-muted/50">
-                              <TableHead className="w-[40%] font-semibold pl-6">
+                              <TableHead className="w-[40%] pl-6 font-semibold">
                                 Name
                               </TableHead>
                               <TableHead className="font-semibold">
@@ -551,7 +550,7 @@ export function ListDatasources({
                               <TableHead className="font-semibold">
                                 Created
                               </TableHead>
-                              <TableHead className="text-right font-semibold pr-6">
+                              <TableHead className="pr-6 text-right font-semibold">
                                 Actions
                               </TableHead>
                             </TableRow>
@@ -569,16 +568,16 @@ export function ListDatasources({
                               return (
                                 <TableRow
                                   key={datasource.id}
-                                  className="group cursor-pointer hover:bg-muted/30 transition-colors"
+                                  className="group hover:bg-muted/30 cursor-pointer transition-colors"
                                   onClick={() =>
                                     navigate(
                                       createDatasourceViewPath(datasource.slug),
                                     )
                                   }
                                 >
-                                  <TableCell className="font-medium py-4 pl-6">
+                                  <TableCell className="py-4 pl-6 font-medium">
                                     <div className="flex items-center gap-3">
-                                      <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-muted/50 p-1.5 transition-colors group-hover:bg-background">
+                                      <div className="bg-muted/50 group-hover:bg-background flex h-9 w-9 items-center justify-center rounded-lg border p-1.5 transition-colors">
                                         {logo ? (
                                           <img
                                             src={logo}
@@ -586,7 +585,7 @@ export function ListDatasources({
                                             className="h-full w-full object-contain"
                                           />
                                         ) : (
-                                          <div className="h-4 w-4 bg-muted-foreground/20 rounded" />
+                                          <div className="bg-muted-foreground/20 h-4 w-4 rounded" />
                                         )}
                                       </div>
                                       <div className="flex flex-col">
@@ -596,7 +595,7 @@ export function ListDatasources({
                                             searchQuery,
                                           )}
                                         </span>
-                                        <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                                        <span className="text-muted-foreground flex items-center gap-1 text-[11px]">
                                           <User className="h-2.5 w-2.5" />
                                           {datasource.createdBy || 'System'}
                                         </span>
@@ -604,7 +603,7 @@ export function ListDatasources({
                                     </div>
                                   </TableCell>
                                   <TableCell>
-                                    <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                                    <span className="bg-muted text-muted-foreground inline-flex items-center rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase">
                                       {datasource.datasource_provider}
                                     </span>
                                   </TableCell>
@@ -614,11 +613,11 @@ export function ListDatasources({
                                       {formattedDate}
                                     </div>
                                   </TableCell>
-                                  <TableCell className="text-right pr-6">
+                                  <TableCell className="pr-6 text-right">
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                                      className="text-muted-foreground hover:text-foreground h-8 w-8 p-0"
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         navigate(
@@ -678,18 +677,20 @@ export function ListDatasources({
             })}
           </div>
         ) : (
-          <div className="rounded-xl border bg-card overflow-hidden">
+          <div className="bg-card overflow-hidden rounded-xl border">
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50 hover:bg-muted/50">
-                  <TableHead className="w-[40%] font-semibold pl-6">Name</TableHead>
+                  <TableHead className="w-[40%] pl-6 font-semibold">
+                    Name
+                  </TableHead>
                   <TableHead className="font-semibold">Provider</TableHead>
                   <TableHead className="font-semibold">
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => handleSortClick('date')}
-                      className="-ml-3 h-8 gap-1 px-3 hover:bg-transparent hover:text-foreground group/sort"
+                      className="hover:text-foreground group/sort -ml-3 h-8 gap-1 px-3 hover:bg-transparent"
                     >
                       Created
                       {sortCriterion === 'date' ? (
@@ -699,11 +700,11 @@ export function ListDatasources({
                           <ArrowDown className="ml-1 h-3.5 w-3.5 text-[#ffcb51]" />
                         )
                       ) : (
-                        <ArrowUpDown className="ml-1 h-3.5 w-3.5 text-muted-foreground/30 group-hover/sort:text-muted-foreground" />
+                        <ArrowUpDown className="text-muted-foreground/30 group-hover/sort:text-muted-foreground ml-1 h-3.5 w-3.5" />
                       )}
                     </Button>
                   </TableHead>
-                  <TableHead className="text-right font-semibold pr-6">
+                  <TableHead className="pr-6 text-right font-semibold">
                     Actions
                   </TableHead>
                 </TableRow>
@@ -719,14 +720,14 @@ export function ListDatasources({
                   return (
                     <TableRow
                       key={datasource.id}
-                      className="group cursor-pointer hover:bg-muted/30 transition-colors"
+                      className="group hover:bg-muted/30 cursor-pointer transition-colors"
                       onClick={() =>
                         navigate(createDatasourceViewPath(datasource.slug))
                       }
                     >
-                      <TableCell className="font-medium py-4 pl-6">
+                      <TableCell className="py-4 pl-6 font-medium">
                         <div className="flex items-center gap-3">
-                          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-muted/50 p-1.5 transition-colors group-hover:bg-background">
+                          <div className="bg-muted/50 group-hover:bg-background flex h-9 w-9 items-center justify-center rounded-lg border p-1.5 transition-colors">
                             {logo ? (
                               <img
                                 src={logo}
@@ -734,14 +735,14 @@ export function ListDatasources({
                                 className="h-full w-full object-contain"
                               />
                             ) : (
-                              <div className="h-4 w-4 bg-muted-foreground/20 rounded" />
+                              <div className="bg-muted-foreground/20 h-4 w-4 rounded" />
                             )}
                           </div>
                           <div className="flex flex-col">
                             <span className="text-sm font-semibold">
                               {highlightMatch(datasource.name, searchQuery)}
                             </span>
-                            <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                            <span className="text-muted-foreground flex items-center gap-1 text-[11px]">
                               <User className="h-2.5 w-2.5" />
                               {datasource.createdBy || 'System'}
                             </span>
@@ -749,7 +750,7 @@ export function ListDatasources({
                         </div>
                       </TableCell>
                       <TableCell>
-                        <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                        <span className="bg-muted text-muted-foreground inline-flex items-center rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase">
                           {datasource.datasource_provider}
                         </span>
                       </TableCell>
@@ -759,11 +760,11 @@ export function ListDatasources({
                           {formattedDate}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right pr-6">
+                      <TableCell className="pr-6 text-right">
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                          className="text-muted-foreground hover:text-foreground h-8 w-8 p-0"
                           onClick={(e) => {
                             e.stopPropagation();
                             navigate(createDatasourceViewPath(datasource.slug));
@@ -782,7 +783,7 @@ export function ListDatasources({
       </div>
 
       {totalPages > 1 && !groupByProvider && (
-        <div className="sticky bottom-0 z-10 shrink-0 flex items-center justify-center border-t py-6 bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
+        <div className="bg-background/95 supports-backdrop-filter:bg-background/60 sticky bottom-0 z-10 flex shrink-0 items-center justify-center border-t py-6 backdrop-blur">
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
@@ -811,7 +812,7 @@ export function ListDatasources({
                       return (
                         <span
                           key={page}
-                          className="text-muted-foreground select-none px-1"
+                          className="text-muted-foreground px-1 select-none"
                         >
                           ...
                         </span>
@@ -824,9 +825,7 @@ export function ListDatasources({
                     <Button
                       key={page}
                       variant={
-                        effectiveCurrentPage === page
-                          ? 'default'
-                          : 'ghost'
+                        effectiveCurrentPage === page ? 'default' : 'ghost'
                       }
                       size="sm"
                       onClick={() => goToPage(page)}

@@ -2,15 +2,9 @@
 
 import * as React from 'react';
 
-import { BookText, Plus, Sparkles, Type } from 'lucide-react';
+import { Plus, Sparkles } from 'lucide-react';
 
 import { Button } from '@qwery/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@qwery/ui/dropdown-menu';
 import { cn } from '@qwery/ui/utils';
 
 interface CellDividerProps {
@@ -22,19 +16,19 @@ export function CellDivider({ onAddCell, className }: CellDividerProps) {
   return (
     <div
       className={cn(
-        'group relative flex h-4 w-full items-center justify-center transition-all duration-300 my-1',
+        'group relative my-1 flex h-4 w-full items-center justify-center transition-all duration-300',
         className,
       )}
     >
       {/* Background line - only visible on hover, fades out at edges */}
-      <div className="absolute inset-x-0 h-px bg-gradient-to-r from-transparent via-border to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+      <div className="via-border absolute inset-x-0 h-px bg-gradient-to-r from-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
 
       {/* Buttons container - only visible on hover of the container */}
-      <div className="flex items-center gap-2 relative z-10 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-y-1 group-hover:translate-y-0">
+      <div className="relative z-10 flex translate-y-1 transform items-center gap-2 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
         <Button
           size="sm"
           variant="secondary"
-          className="h-7 gap-1.5 px-3 rounded-full text-[11px] font-semibold bg-background border shadow-sm hover:bg-accent transition-all duration-200 active:scale-95 hover:shadow-md"
+          className="bg-background hover:bg-accent h-7 gap-1.5 rounded-full border px-3 text-[11px] font-semibold shadow-sm transition-all duration-200 hover:shadow-md active:scale-95"
           onClick={() => onAddCell('query')}
         >
           <Plus className="h-3.5 w-3.5" />
@@ -43,7 +37,7 @@ export function CellDivider({ onAddCell, className }: CellDividerProps) {
         <Button
           size="sm"
           variant="secondary"
-          className="h-7 gap-1.5 px-3 rounded-full text-[11px] font-semibold bg-background border shadow-sm hover:bg-accent transition-all duration-200 active:scale-95 hover:shadow-md"
+          className="bg-background hover:bg-accent h-7 gap-1.5 rounded-full border px-3 text-[11px] font-semibold shadow-sm transition-all duration-200 hover:shadow-md active:scale-95"
           onClick={() => onAddCell('text')}
         >
           <Plus className="h-3.5 w-3.5" />
@@ -52,7 +46,7 @@ export function CellDivider({ onAddCell, className }: CellDividerProps) {
         <Button
           size="sm"
           variant="secondary"
-          className="h-7 gap-1.5 px-3 rounded-full text-[11px] font-semibold bg-background border shadow-sm hover:bg-accent transition-all duration-200 active:scale-95 hover:shadow-md"
+          className="bg-background hover:bg-accent h-7 gap-1.5 rounded-full border px-3 text-[11px] font-semibold shadow-sm transition-all duration-200 hover:shadow-md active:scale-95"
           onClick={() => onAddCell('prompt')}
         >
           <Sparkles className="h-3.5 w-3.5" />

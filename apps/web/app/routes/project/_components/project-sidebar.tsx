@@ -16,7 +16,6 @@ import pathsConfig from '~/config/paths.config';
 import { createNavigationConfig } from '~/config/project.navigation.config';
 import { createPath } from '~/config/qwery.navigation.config';
 import { Shortcuts } from 'node_modules/@qwery/ui/src/qwery/shortcuts';
-import { useTelemetry, PROJECT_EVENTS } from '@qwery/telemetry';
 import { useWorkspace } from '~/lib/context/workspace-context';
 import { useGetNotebooksByProjectId } from '~/lib/queries/use-get-notebook';
 import { useDeleteNotebook } from '~/lib/mutations/use-notebook';
@@ -37,7 +36,6 @@ import { Button } from '@qwery/ui/button';
 export function ProjectSidebar() {
   const navigate = useNavigate();
   const { workspace, repositories } = useWorkspace();
-  const telemetry = useTelemetry();
   const params = useParams();
   const slug = params.slug as string;
 
@@ -185,7 +183,9 @@ export function ProjectSidebar() {
   ) : undefined;
 
   // Get unsaved notebook slugs from localStorage
-  const [unsavedNotebookSlugs, setUnsavedNotebookSlugs] = useState<string[]>([]);
+  const [unsavedNotebookSlugs, setUnsavedNotebookSlugs] = useState<string[]>(
+    [],
+  );
 
   useEffect(() => {
     const updateUnsavedSlugs = () => {

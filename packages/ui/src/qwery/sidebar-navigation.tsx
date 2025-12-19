@@ -5,7 +5,6 @@ import {
   SidebarSeparator,
   SidebarGroup,
   SidebarGroupLabel,
-  SidebarGroupAction,
   SidebarGroupContent,
   SidebarMenu,
   SidebarMenuButton,
@@ -91,7 +90,7 @@ function SidebarLabelText({
       </span>
       {hasUnsavedChanges && (
         <span
-          className="h-3 w-3 shrink-0 rounded-full bg-[#ffcb51] border border-[#ffcb51]/50 shadow-sm"
+          className="h-3 w-3 shrink-0 rounded-full border border-[#ffcb51]/50 bg-[#ffcb51] shadow-sm"
           aria-label="Unsaved changes"
           title="Unsaved changes"
           style={{ minWidth: '12px', minHeight: '12px' }}
@@ -235,36 +234,38 @@ export function SidebarNavigation({
             <Container key={`collapsible-${index}`}>
               <SidebarGroup key={item.label}>
                 <div className="flex items-center gap-2">
-                <If
-                  condition={groupState.collapsible}
-                  fallback={
-                      <SidebarGroupLabel className={cn('flex-1', { hidden: isCollapsed })}>
-                      <SidebarLabelText
-                        label={item.label}
-                        suffix={item.labelSuffix}
-                      />
-                    </SidebarGroupLabel>
-                  }
-                >
-                  <SidebarGroupLabel
-                      className={cn('flex-1', { hidden: isCollapsed })}
-                    asChild
+                  <If
+                    condition={groupState.collapsible}
+                    fallback={
+                      <SidebarGroupLabel
+                        className={cn('flex-1', { hidden: isCollapsed })}
+                      >
+                        <SidebarLabelText
+                          label={item.label}
+                          suffix={item.labelSuffix}
+                        />
+                      </SidebarGroupLabel>
+                    }
                   >
-                    <CollapsibleTrigger className="flex items-center gap-1">
-                      <SidebarLabelText
-                        label={item.label}
-                        suffix={item.labelSuffix}
-                      />
-                      <ChevronDown className="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-180" />
-                    </CollapsibleTrigger>
-                  </SidebarGroupLabel>
-                </If>
+                    <SidebarGroupLabel
+                      className={cn('flex-1', { hidden: isCollapsed })}
+                      asChild
+                    >
+                      <CollapsibleTrigger className="flex items-center gap-1">
+                        <SidebarLabelText
+                          label={item.label}
+                          suffix={item.labelSuffix}
+                        />
+                        <ChevronDown className="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                      </CollapsibleTrigger>
+                    </SidebarGroupLabel>
+                  </If>
 
-                <If condition={item.renderAction && !isCollapsed}>
-                    <div className="flex items-center justify-center shrink-0">
-                    {item.renderAction}
+                  <If condition={item.renderAction && !isCollapsed}>
+                    <div className="flex shrink-0 items-center justify-center">
+                      {item.renderAction}
                     </div>
-                </If>
+                  </If>
                 </div>
 
                 <SidebarGroupContent>
@@ -361,7 +362,11 @@ export function SidebarNavigation({
                               <SidebarLabelText
                                 label={child.label}
                                 suffix={child.labelSuffix}
-                                hasUnsavedChanges={'hasUnsavedChanges' in child ? (child.hasUnsavedChanges as boolean) : undefined}
+                                hasUnsavedChanges={
+                                  'hasUnsavedChanges' in child
+                                    ? (child.hasUnsavedChanges as boolean)
+                                    : undefined
+                                }
                               />
                             </span>
                           );
@@ -523,7 +528,12 @@ export function SidebarNavigation({
                                                           ? child.title
                                                           : child.label
                                                       }
-                                                      hasUnsavedChanges={'hasUnsavedChanges' in child ? (child.hasUnsavedChanges as boolean) : undefined}
+                                                      hasUnsavedChanges={
+                                                        'hasUnsavedChanges' in
+                                                        child
+                                                          ? (child.hasUnsavedChanges as boolean)
+                                                          : undefined
+                                                      }
                                                     />
                                                   </span>
                                                 </Link>
