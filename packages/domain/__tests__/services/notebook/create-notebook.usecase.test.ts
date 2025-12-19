@@ -68,7 +68,7 @@ describe('CreateNotebookService', () => {
     expect(result.cells[0]).toMatchObject({
       cellId: 1,
       cellType: 'query',
-      query: '',
+      query: '\n'.repeat(9), // 10 lines total (9 newlines + 1 empty line)
       datasources: [],
       isActive: true,
       runMode: 'default',
@@ -136,7 +136,7 @@ describe('CreateNotebookService', () => {
     expect(result.cells[0]).toMatchObject({
       cellId: 1,
       cellType: 'query',
-      query: '',
+      query: '\n'.repeat(9), // 10 lines total (9 newlines + 1 empty line)
       datasources: [],
       isActive: true,
       runMode: 'default',
