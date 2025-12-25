@@ -22,7 +22,6 @@ export function createLlamaCppModelProvider({
   const llamacpp = createOpenAI({
     baseURL: resolvedBaseUrl,
     apiKey: resolvedApiKey,
-    compatibility: 'compatible',
   });
 
   return {
