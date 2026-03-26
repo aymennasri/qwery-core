@@ -1,5 +1,6 @@
 export * from './anthropic.prompt';
 export * from './datasource-reminder';
+export * from './db-performance-audit.prompt';
 export * from './detect-intent.prompt';
 export * from './final-answer.prompt';
 export * from './generic.prompt';

@@ -25,7 +25,7 @@ import {
   transportFactory,
   type UIMessage,
   getDefaultModel,
-} from '@qwery/agent-factory-sdk';
+} from '@qwery/agent-factory-sdk/browser';
 import { MessageOutput, UsageOutput } from '@qwery/domain/usecases';
 import { convertMessages } from '~/lib/utils/messages-converter';
 import { useProjectOptional } from '~/lib/context/project-context';
@@ -146,6 +146,17 @@ const NoDatasourceDialog = forwardRef<NoDatasourceDialogRef>(
   },
 );
 
+const AGENT_OPTIONS = [
+  { name: 'Query', value: 'query' },
+  { name: 'Ask', value: 'ask' },
+  {
+    name: 'DB Audit',
+    value: 'db-performance-audit',
+    autoRunPrompt:
+      'Run a PostgreSQL database performance audit for the current datasource. Focus on the top latency-impact findings, back every conclusion with evidence, and include validation steps for each recommendation.',
+  },
+];
+
 type SendMessageFn = (
   message: { text: string },
   options?: { body?: Record<string, unknown> },
@@ -259,6 +270,7 @@ export const AgentUIWrapper = forwardRef<
   const currentModelRef = useRef<string>(
     SUPPORTED_MODELS[0]?.value ?? getDefaultModel(),
   );
+  const currentAgentRef = useRef<string>(AGENT_OPTIONS[0]?.value ?? 'query');
   const invalidateUsage = useInvalidateUsage();
   const { repositories, workspace } = useWorkspace();
   const { data: usage } = useGetUsage(
@@ -375,6 +387,7 @@ export const AgentUIWrapper = forwardRef<
     sendMessageRef,
     internalSendMessageRef,
     currentModelRef,
+    currentAgentRef,
     setMessagesRef,
     sendMessageRafIdRef,
     getCellDatasource,
@@ -583,6 +596,7 @@ export const AgentUIWrapper = forwardRef<
       <QweryAgentUI
         transport={transport}
         initialMessages={convertedInitialMessages}
+        agents={AGENT_OPTIONS}
         models={enabledModels}
         allModels={supportedModels}
         onModelsChange={handleModelsChange}

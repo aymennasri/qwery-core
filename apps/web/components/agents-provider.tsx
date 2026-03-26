@@ -11,7 +11,7 @@ import {
   type DriverExtension,
 } from '@qwery/extensions-sdk';
 import { getBrowserDriverInstance } from '../lib/services/browser-driver';
-import { getDefaultModel } from '@qwery/agent-factory-sdk';
+import { getDefaultModel } from '@qwery/agent-factory-sdk/browser';
 import { apiPost, driverCommand } from '~/lib/repositories/api-client';
 import { useGetDatasourceExtensions } from '~/lib/queries/use-get-extension';
 import { resolveDatasourceDriver } from '~/lib/utils/datasource-driver';

@@ -106,6 +106,7 @@ import type { SearchEngine } from './ai/web-fetch-visualizer';
 export interface QweryAgentUIProps {
   initialMessages?: UIMessage[];
   transport: (model: string) => ChatTransport<UIMessage>;
+  agents?: { name: string; value: string; autoRunPrompt?: string }[];
   models: { name: string; value: string }[];
   allModels?: { name: string; value: string }[];
   onModelsChange?: (enabledModels: { name: string; value: string }[]) => void;
@@ -127,6 +128,7 @@ export interface QweryAgentUIProps {
   onSendMessageReady?: (
     sendMessage: ReturnType<typeof useChat>['sendMessage'],
     model: string,
+    agentId: string,
   ) => void;
   onMessagesChange?: (messages: UIMessage[]) => void;
   onDatasourceNameClick?: (id: string, name: string) => void;
@@ -199,6 +201,7 @@ function QweryAgentUIContent(props: QweryAgentUIProps) {
   const {
     initialMessages,
     transport,
+    agents,
     models,
     allModels,
     onModelsChange,
@@ -283,11 +286,20 @@ function QweryAgentUIContent(props: QweryAgentUIProps) {
     }
     return {
       input: '',
+      agentId: agents?.[0]?.value ?? 'query',
       model: models[0]?.value ?? '',
       webSearch,
     };
   });
 
+  const agentIds = useMemo(
+    () => new Set((agents ?? []).map((agent) => agent.value)),
+    [agents],
+  );
+  const effectiveAgentId = useMemo(() => {
+    if (!agents || agents.length === 0) return state.agentId;
+    return agentIds.has(state.agentId) ? state.agentId : agents[0]!.value;
+  }, [agentIds, agents, state.agentId]);
   const modelIds = useMemo(() => new Set(models.map((m) => m.value)), [models]);
   const effectiveModel = useMemo(() => {
     if (models.length === 0) return state.model;
@@ -386,6 +398,7 @@ function QweryAgentUIContent(props: QweryAgentUIProps) {
         ...options,
         body: {
           ...body,
+          agentId: body.agentId ?? effectiveAgentId,
           model: body.model ?? effectiveModel,
           webSearch: body.webSearch ?? state.webSearch,
           searchEngine:
@@ -397,6 +410,7 @@ function QweryAgentUIContent(props: QweryAgentUIProps) {
       });
     },
     [
+      effectiveAgentId,
       effectiveModel,
       getDatasourcesForSend,
       preferredSearchEngine,
@@ -406,6 +420,54 @@ function QweryAgentUIContent(props: QweryAgentUIProps) {
       state.webSearch,
     ],
   );
+
+  const previousAgentIdRef = useRef(effectiveAgentId);
+  useEffect(() => {
+    if (!agents || agents.length === 0) {
+      return;
+    }
+
+    if (previousAgentIdRef.current === effectiveAgentId) {
+      return;
+    }
+
+    if (status === 'streaming' || status === 'submitted') {
+      return;
+    }
+
+    const selectedAgent = agents.find(
+      (agent) => agent.value === effectiveAgentId,
+    );
+    previousAgentIdRef.current = effectiveAgentId;
+
+    if (!selectedAgent?.autoRunPrompt) {
+      return;
+    }
+
+    const autoRunPrompt = selectedAgent.autoRunPrompt;
+
+    const run = async () => {
+      try {
+        await sendMessageWithDefaults(
+          { text: autoRunPrompt },
+          {
+            body: {
+              agentId: effectiveAgentId,
+            },
+          },
+        );
+      } catch {
+        toast.error('Failed to start the audit automatically.');
+      }
+    };
+
+    void run();
+  }, [
+    agents,
+    effectiveAgentId,
+    sendMessageWithDefaults,
+    status,
+  ]);
 
   // Play notification sound when agent response completes
   useCompletionSound(status);
@@ -455,12 +517,14 @@ function QweryAgentUIContent(props: QweryAgentUIProps) {
           setMessages: typeof setMessages;
         },
         effectiveModel,
+        effectiveAgentId,
       );
     }
   }, [
     sendMessageWithDefaults,
     setMessages,
     effectiveModel,
+    effectiveAgentId,
     onSendMessageReady,
   ]);
 
@@ -1010,15 +1074,28 @@ function QweryAgentUIContent(props: QweryAgentUIProps) {
         });
         messageText = `__QWERY_CONTEXT__${contextData}__QWERY_CONTEXT_END__${cleanSuggestionText}`;
       }
-      sendMessageWithDefaults({ text: messageText }, {});
+      sendMessageWithDefaults(
+        { text: messageText },
+        {
+          body: {
+            agentId: effectiveAgentId,
+          },
+        },
+      );
       scrollToBottomRef.current?.();
     },
     [
+      getDatasourcesForSend,
       messages,
       lastAssistantMessage?.id,
       sendMessageWithDefaults,
       scrollToBottomRef,
       onBeforeSuggestionSend,
+      effectiveAgentId,
+      effectiveModel,
+      preferredSearchEngineProp,
+      preferredSearchEngine,
+      state.webSearch,
     ],
   );
 
@@ -1175,6 +1252,7 @@ function QweryAgentUIContent(props: QweryAgentUIProps) {
                       sendMessage={sendMessageWithDefaults}
                       state={state}
                       setState={setState}
+                      agents={agents}
                       textareaRef={textareaRef}
                       status={status}
                       stop={stop}
@@ -1309,6 +1387,7 @@ function QweryAgentUIContent(props: QweryAgentUIProps) {
                         sendMessage={sendMessageWithDefaults}
                         state={state}
                         setState={setState}
+                        agents={agents}
                         textareaRef={textareaRef}
                         status={status}
                         stop={stop}
@@ -2064,6 +2143,7 @@ function QweryAgentUIContent(props: QweryAgentUIProps) {
                 sendMessage={sendMessageWithDefaults}
                 state={state}
                 setState={setState}
+                agents={agents}
                 textareaRef={textareaRef}
                 status={status}
                 stop={stop}
@@ -2159,6 +2239,7 @@ function PromptInputInner({
   sendMessage,
   state,
   setState,
+  agents,
   textareaRef,
   status,
   stop,
@@ -2185,16 +2266,19 @@ function PromptInputInner({
   sendMessage: ReturnType<typeof useChat>['sendMessage'];
   state: {
     input: string;
+    agentId: string;
     model: string;
     webSearch: boolean;
   };
   setState: React.Dispatch<
     React.SetStateAction<{
       input: string;
+      agentId: string;
       model: string;
       webSearch: boolean;
     }>
   >;
+  agents?: { name: string; value: string; autoRunPrompt?: string }[];
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   status: ReturnType<typeof useChat>['status'];
   stop: ReturnType<typeof useChat>['stop'];
@@ -2248,6 +2332,7 @@ function PromptInputInner({
         {
           body: {
             model: state.model,
+            agentId: state.agentId,
             webSearch: state.webSearch,
             searchEngine: preferredSearchEngine,
             datasources: bodyDatasources,
@@ -2291,6 +2376,9 @@ function PromptInputInner({
       onSubmit={handleSubmit}
       input={state.input}
       setInput={(input) => setState((prev) => ({ ...prev, input }))}
+      agentId={state.agentId}
+      setAgentId={(agentId) => setState((prev) => ({ ...prev, agentId }))}
+      agents={agents}
       model={state.model}
       setModel={(model) => setState((prev) => ({ ...prev, model }))}
       models={models}

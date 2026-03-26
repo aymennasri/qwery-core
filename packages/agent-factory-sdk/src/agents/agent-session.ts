@@ -19,6 +19,7 @@ import { SystemPrompt } from '../llm/system';
 import { v4 as uuidv4 } from 'uuid';
 import { loadDatasources } from '../tools/datasource-loader';
 import type { Datasource } from '@qwery/domain/entities';
+import type { McpServerConfig } from '../mcp';
 
 export type AgentSessionPromptInput = {
   conversationSlug: string;
@@ -44,6 +45,8 @@ export type AgentSessionPromptInput = {
   maxSteps?: number;
   /** Optional: MCP server URL (e.g. qwery server base + /mcp). When set, MCP tools are merged with agent tools. */
   mcpServerUrl?: string;
+  /** Optional: Multiple MCP server definitions merged into the available toolset. */
+  mcpServers?: McpServerConfig[];
 };
 
 const DEFAULT_AGENT_ID = 'query';
@@ -169,6 +172,7 @@ export async function loop(input: AgentSessionPromptInput): Promise<Response> {
     onToolMetadata,
     maxSteps: inputMaxSteps,
     mcpServerUrl,
+    mcpServers,
   } = input;
   const agentId = inputAgentId ?? DEFAULT_AGENT_ID;
 
@@ -371,7 +375,11 @@ export async function loop(input: AgentSessionPromptInput): Promise<Response> {
       agentId,
       modelForRegistry,
       getContext,
-      { mcpServerUrl, webSearch: input.webSearch },
+      {
+        mcpServerUrl,
+        webSearch: input.webSearch,
+        mcpServers,
+      },
     );
 
     const reminderContext = {

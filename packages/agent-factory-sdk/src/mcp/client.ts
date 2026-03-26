@@ -6,6 +6,12 @@ export type GetMcpToolsOptions = {
   namePrefix?: string;
 };
 
+export type McpServerConfig = {
+  url: string;
+  headers?: Record<string, string>;
+  namePrefix?: string;
+};
+
 export type GetMcpToolsResult = {
   tools: Record<string, Tool>;
   close: () => Promise<void>;

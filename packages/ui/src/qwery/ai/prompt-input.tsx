@@ -5,6 +5,11 @@ import {
   PromptInputBody,
   PromptInputHeader,
   type PromptInputMessage,
+  PromptInputSelect,
+  PromptInputSelectContent,
+  PromptInputSelectItem,
+  PromptInputSelectTrigger,
+  PromptInputSelectValue,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputFooter,
@@ -45,6 +50,9 @@ export interface QweryPromptInputProps {
   onSubmit: (message: PromptInputMessage) => void;
   input: string;
   setInput: (input: string) => void;
+  agentId?: string;
+  setAgentId?: (agentId: string) => void;
+  agents?: { name: string; value: string; autoRunPrompt?: string }[];
   model: string;
   setModel: (model: string) => void;
   models: ModelOption[];
@@ -126,13 +134,13 @@ function PromptInputContent(props: QweryPromptInputProps) {
     [setPreferredSearchEngine],
   );
 
-  const canManageModels =
-    props.allModels != null && props.onModelsChange != null;
   const allModels = props.allModels;
   const onModelsChange = props.onModelsChange;
+  const models = props.models;
+  const canManageModels = allModels != null && onModelsChange != null;
   const enabledModelIds = useMemo(
-    () => new Set(props.models.map((m) => m.value)),
-    [props.models],
+    () => new Set(models.map((m) => m.value)),
+    [models],
   );
 
   const handleModelsChange = useCallback(
@@ -264,6 +272,30 @@ function PromptInputContent(props: QweryPromptInputProps) {
                 isLoading={props.datasourcesLoading}
               />
             )}
+          {props.agents && props.agents.length > 0 && props.setAgentId && (
+            <PromptInputSelect
+              onValueChange={(value) => {
+                props.setAgentId?.(value);
+              }}
+              value={
+                props.agentId &&
+                props.agents.some((agent) => agent.value === props.agentId)
+                  ? props.agentId
+                  : props.agents[0]?.value
+              }
+            >
+              <PromptInputSelectTrigger>
+                <PromptInputSelectValue placeholder="Agent" />
+              </PromptInputSelectTrigger>
+              <PromptInputSelectContent>
+                {props.agents.map((agent) => (
+                  <PromptInputSelectItem key={agent.value} value={agent.value}>
+                    {agent.name}
+                  </PromptInputSelectItem>
+                ))}
+              </PromptInputSelectContent>
+            </PromptInputSelect>
+          )}
           <ModelSelector
             models={props.models}
             value={props.model}

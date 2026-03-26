@@ -32,7 +32,7 @@ import { useGetNotebookConversation } from '~/lib/queries/use-get-notebook-conve
 import {
   NOTEBOOK_CELL_TYPE,
   type NotebookCellType,
-} from '@qwery/agent-factory-sdk';
+} from '@qwery/agent-factory-sdk/browser';
 import { scrollToElementBySelector } from '@qwery/ui/ai';
 import { useGetDatasourceExtensions } from '~/lib/queries/use-get-extension';
 import {

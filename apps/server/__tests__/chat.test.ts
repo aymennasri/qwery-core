@@ -1,30 +1,147 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Hono } from 'hono';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createTestApp, cleanupTestDir } from './helpers/setup';
+const promptMock = vi.fn();
+const validateUIMessagesMock = vi.fn(async ({ messages }) => messages);
+const resolveChatDatasourcesMock = vi.fn(async () => ['ds-from-context']);
 
-describe('Server API – Chat', () => {
-  let app: Hono;
-  let testDir: string;
+vi.mock('@qwery/agent-factory-sdk', () => ({
+  prompt: promptMock,
+  getDefaultModel: vi.fn(() => 'test-model'),
+  validateUIMessages: validateUIMessagesMock,
+  PROMPT_SOURCE: {
+    CHAT: 'chat',
+    INLINE: 'inline',
+  },
+}));
 
-  beforeAll(async () => {
-    const out = await createTestApp();
-    app = out.app;
-    testDir = out.testDir;
+vi.mock('@qwery/agent-factory-sdk/tools/registry', () => ({
+  Registry: {
+    agents: {
+      get: vi.fn((agentId: string) =>
+        agentId === 'db-performance-audit' ? { id: agentId } : undefined,
+      ),
+    },
+  },
+}));
+
+vi.mock('../src/lib/repositories', () => ({
+  createRepositories: vi.fn(async () => ({
+    conversation: {
+      findBySlug: vi.fn(async () => null),
+    },
+  })),
+}));
+
+vi.mock('../src/lib/telemetry', () => ({
+  getTelemetry: vi.fn(async () => ({ service: 'test-telemetry' })),
+}));
+
+vi.mock('../src/helpers/chat-helper', () => ({
+  resolveChatDatasources: resolveChatDatasourcesMock,
+}));
+
+describe('Server API - Chat', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    promptMock.mockResolvedValue(new Response('stream ok', { status: 200 }));
+    validateUIMessagesMock.mockImplementation(async ({ messages }) => messages);
+    resolveChatDatasourcesMock.mockResolvedValue(['ds-from-context']);
   });
 
-  afterAll(async () => {
-    await cleanupTestDir(testDir);
-  });
+  it('rejects invalid request bodies', async () => {
+    const { createChatRoutes } = await import('../src/routes/chat');
+    const app = createChatRoutes();
 
-  describe('Chat', () => {
-    it('POST /api/chat/:slug with invalid body returns 400', async () => {
-      const res = await app.request('http://localhost/api/chat/test-slug', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      expect(res.status).toBe(400);
+    const res = await app.request('http://localhost/test-slug', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
     });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects unknown agent ids before prompt execution', async () => {
+    const { createChatRoutes } = await import('../src/routes/chat');
+    const app = createChatRoutes();
+
+    const res = await app.request('http://localhost/test-slug', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: 'unknown-agent',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'hello' }] }],
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: 'Invalid agentId: unknown-agent',
+    });
+    expect(promptMock).not.toHaveBeenCalled();
+  });
+
+  it('passes agentId and datasource context into prompt execution', async () => {
+    const { createChatRoutes } = await import('../src/routes/chat');
+    const app = createChatRoutes();
+
+    const response = await app.request('http://localhost/test-slug', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: 'db-performance-audit',
+        messages: [
+          {
+            role: 'user',
+            parts: [
+              {
+                type: 'text',
+                text: 'Run a PostgreSQL audit',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(resolveChatDatasourcesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bodyDatasources: undefined,
+        conversationSlug: 'test-slug',
+      }),
+    );
+    expect(validateUIMessagesMock).toHaveBeenCalled();
+    expect(promptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationSlug: 'test-slug',
+        model: 'test-model',
+        agentId: 'db-performance-audit',
+        datasources: ['ds-from-context'],
+        generateTitle: true,
+      }),
+    );
+  });
+
+  it('passes only the primary MCP server into prompt execution', async () => {
+    const { createChatRoutes } = await import('../src/routes/chat');
+    const app = createChatRoutes();
+
+    const response = await app.request('http://localhost/test-slug', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: 'db-performance-audit',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'audit' }] }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(promptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mcpServerUrl: 'http://localhost/mcp',
+        mcpServers: [{ url: 'http://localhost/mcp' }],
+      }),
+    );
   });
 });

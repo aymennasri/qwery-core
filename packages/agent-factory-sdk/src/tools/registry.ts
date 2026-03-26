@@ -3,7 +3,13 @@ import { z } from 'zod';
 import type { Tool } from 'ai';
 import type { ToolInfo, ToolContext, Model, ToolExecute } from './tool';
 import type { AgentInfoWithId } from '../agents/agent';
-import { AskAgent, QueryAgent, CompactionAgent, SummaryAgent } from '../agents';
+import {
+  AskAgent,
+  QueryAgent,
+  DbPerformanceAuditAgent,
+  CompactionAgent,
+  SummaryAgent,
+} from '../agents';
 import { TodoWriteTool, TodoReadTool } from './todo';
 import { WebFetchTool } from './webfetch';
 import { GetSchemaTool } from './get-schema';
@@ -13,8 +19,21 @@ import { SelectChartTypeTool } from './select-chart-type-tool';
 import { GenerateChartTool } from './generate-chart-tool';
 import { GetSkillTool } from './get-skill';
 import { TaskTool } from './task';
+import { DetectDbEngineTool } from './detect-db-engine';
+import { GetTopSlowQueriesTool } from './get-top-slow-queries';
+import { ExplainQueryPlanTool } from './explain-query-plan';
+import { GetIndexHealthTool } from './get-index-health';
+import { GetTableHealthTool } from './get-table-health';
+import { GetInfraRuntimeSignalsTool } from './get-infra-runtime-signals';
+import { GetRecentDbLogsTool } from './get-recent-db-logs';
+import { GetLockAndBlockingAnalysisTool } from './get-lock-and-blocking-analysis';
+import { GetStatisticsHealthTool } from './get-statistics-health';
+import { GetBloatEstimatesTool } from './get-bloat-estimates';
+import { GetReplicationHealthTool } from './get-replication-health';
+import { ValidateRemediationInGfsCliTool } from './validate-remediation-in-gfs-cli';
 import { getLogger } from '@qwery/shared/logger';
 import { getMcpTools } from '../mcp/client.js';
+import type { McpServerConfig } from '../mcp/client.js';
 import { GetTodoByConversationService } from '@qwery/domain/services';
 import type { Repositories } from '@qwery/domain/repositories';
 
@@ -75,11 +94,48 @@ function registerTools() {
   tools.set(GenerateChartTool.id, GenerateChartTool as unknown as ToolInfo);
   tools.set(GetSkillTool.id, GetSkillTool as unknown as ToolInfo);
   tools.set(TaskTool.id, TaskTool as unknown as ToolInfo);
+  tools.set(DetectDbEngineTool.id, DetectDbEngineTool as unknown as ToolInfo);
+  tools.set(
+    GetTopSlowQueriesTool.id,
+    GetTopSlowQueriesTool as unknown as ToolInfo,
+  );
+  tools.set(
+    ExplainQueryPlanTool.id,
+    ExplainQueryPlanTool as unknown as ToolInfo,
+  );
+  tools.set(GetIndexHealthTool.id, GetIndexHealthTool as unknown as ToolInfo);
+  tools.set(GetTableHealthTool.id, GetTableHealthTool as unknown as ToolInfo);
+  tools.set(
+    GetInfraRuntimeSignalsTool.id,
+    GetInfraRuntimeSignalsTool as unknown as ToolInfo,
+  );
+  tools.set(GetRecentDbLogsTool.id, GetRecentDbLogsTool as unknown as ToolInfo);
+  tools.set(
+    GetLockAndBlockingAnalysisTool.id,
+    GetLockAndBlockingAnalysisTool as unknown as ToolInfo,
+  );
+  tools.set(
+    GetStatisticsHealthTool.id,
+    GetStatisticsHealthTool as unknown as ToolInfo,
+  );
+  tools.set(
+    GetBloatEstimatesTool.id,
+    GetBloatEstimatesTool as unknown as ToolInfo,
+  );
+  tools.set(
+    GetReplicationHealthTool.id,
+    GetReplicationHealthTool as unknown as ToolInfo,
+  );
+  tools.set(
+    ValidateRemediationInGfsCliTool.id,
+    ValidateRemediationInGfsCliTool as unknown as ToolInfo,
+  );
 }
 
 function registerAgents() {
   agents.set(AskAgent.id, AskAgent);
   agents.set(QueryAgent.id, QueryAgent);
+  agents.set(DbPerformanceAuditAgent.id, DbPerformanceAuditAgent);
   agents.set(CompactionAgent.id, CompactionAgent);
   agents.set(SummaryAgent.id, SummaryAgent);
 }
@@ -96,6 +152,7 @@ export type ForAgentOptions = {
   mcpServerUrl?: string;
   mcpNamePrefix?: string;
   webSearch?: boolean;
+  mcpServers?: McpServerConfig[];
 };
 
 export type ForAgentResult = {
@@ -285,28 +342,56 @@ export const Registry = {
         });
       }
 
-      const mcpServerUrl = forAgentOptions?.mcpServerUrl;
-      if (mcpServerUrl) {
-        try {
-          const { tools: mcpTools, close } = await getMcpTools(mcpServerUrl, {
-            namePrefix: forAgentOptions?.mcpNamePrefix,
-          });
-          return {
-            tools: { ...result, ...mcpTools },
-            close,
-          };
-        } catch (mcpError) {
-          const logger = await getLogger();
-          logger.warn(
-            {
-              err: mcpError,
-              mcpServerUrl,
-              message:
-                mcpError instanceof Error ? mcpError.message : String(mcpError),
-            },
-            'MCP server unavailable, continuing without MCP tools',
-          );
+      const configuredMcpServers =
+        forAgentOptions?.mcpServers && forAgentOptions.mcpServers.length > 0
+          ? forAgentOptions.mcpServers
+          : forAgentOptions?.mcpServerUrl
+            ? [
+                {
+                  url: forAgentOptions.mcpServerUrl,
+                  namePrefix: forAgentOptions.mcpNamePrefix,
+                },
+              ]
+            : [];
+
+      if (configuredMcpServers.length > 0) {
+        const mergedTools = { ...result };
+        const closeCallbacks: Array<() => Promise<void>> = [];
+
+        for (const server of configuredMcpServers) {
+          try {
+            const { tools: mcpTools, close } = await getMcpTools(server.url, {
+              headers: server.headers,
+              namePrefix: server.namePrefix,
+            });
+            Object.assign(mergedTools, mcpTools);
+            closeCallbacks.push(close);
+          } catch (mcpError) {
+            const logger = await getLogger();
+            logger.warn(
+              {
+                err: mcpError,
+                mcpServerUrl: server.url,
+                message:
+                  mcpError instanceof Error
+                    ? mcpError.message
+                    : String(mcpError),
+              },
+              'MCP server unavailable, continuing without MCP tools',
+            );
+          }
         }
+
+        if (closeCallbacks.length > 0) {
+          return {
+            tools: mergedTools,
+            close: async () => {
+              await Promise.all(closeCallbacks.map((close) => close()));
+            },
+          };
+        }
+
+        return { tools: mergedTools };
       }
 
       return { tools: result };

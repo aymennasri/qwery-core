@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useRef, type ReactNode } from 'react';
-import type { NotebookCellType } from '@qwery/agent-factory-sdk';
+import type { NotebookCellType } from '@qwery/agent-factory-sdk/browser';
 
 type NotebookSidebarContextValue = {
   openSidebar: (

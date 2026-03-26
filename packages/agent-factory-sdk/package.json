@@ -17,10 +17,13 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./browser": "./src/browser.ts",
     "./config": "./src/config/index.ts",
     "./config/node": "./src/config/node.ts",
     "./llm": "./src/llm/index.ts",
     "./mcp": "./src/mcp/index.ts",
+    "./tools/registry": "./src/tools/registry.ts",
+    "./tools/tool": "./src/tools/tool.ts",
     "./tools/datasource-name-utils": "./src/tools/datasource-name-utils.ts",
     "./tools/datasource-loader": "./src/tools/datasource-loader.ts",
     "./services/duckdb-query-engine.service": "./src/services/duckdb-query-engine.service.ts"

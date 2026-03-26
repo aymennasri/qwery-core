@@ -9,7 +9,9 @@ import {
   type PromptSource,
   type NotebookCellType,
   type UIMessage,
+  type McpServerConfig,
 } from '@qwery/agent-factory-sdk';
+import { Registry } from '@qwery/agent-factory-sdk/tools/registry';
 import { normalizeUIRole } from '@qwery/shared/message-role-utils';
 import { MessageRole } from '@qwery/domain/entities';
 import type { Repositories } from '@qwery/domain/repositories';
@@ -21,6 +23,7 @@ import { handleDomainException } from '../lib/http-utils';
 const chatBodySchema = z.object({
   messages: z.array(z.unknown()),
   model: z.string().optional(),
+  agentId: z.string().min(1).optional(),
   datasources: z.array(z.string()).optional(),
   webSearch: z.boolean().optional(),
   trigger: z.enum(['submit-message', 'regenerate-message']).optional(),
@@ -52,6 +55,11 @@ export function createChatRoutes() {
         const body = c.req.valid('json');
         const messages = body.messages as UIMessage[];
         const model = body.model ?? getDefaultModel();
+        const agentId = body.agentId;
+
+        if (agentId && !Registry.agents.get(agentId)) {
+          return c.json({ error: `Invalid agentId: ${agentId}` }, 400);
+        }
 
         const repositories = await getRepositories();
         if (body.trigger === 'regenerate-message') {
@@ -164,17 +172,20 @@ User request: ${cleanText}`;
         const mcpServerUrl =
           process.env.QWERY_MCP_SERVER_URL ??
           `${new URL(c.req.url).origin}/mcp`;
+        const mcpServers: McpServerConfig[] = [{ url: mcpServerUrl }];
 
         const response = await prompt({
           conversationSlug: slug,
           messages: validatedMessages,
           model,
+          agentId,
           datasources,
           webSearch: body.webSearch,
           repositories,
           telemetry,
           generateTitle: true,
           mcpServerUrl,
+          mcpServers,
         });
 
         return response;

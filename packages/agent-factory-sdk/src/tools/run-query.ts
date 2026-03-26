@@ -39,11 +39,11 @@ export const RunQueryTool = Tool.define('runQuery', {
 
     const startTime = performance.now();
 
-    const datasource = await repositories.datasource.findById(
-      attachedDatasources[0] ?? '',
-    );
+    const resolvedDatasourceId = datasourceId || attachedDatasources[0] || '';
+    const datasource =
+      await repositories.datasource.findById(resolvedDatasourceId);
     if (!datasource) {
-      throw new Error(`Datasource not found: ${attachedDatasources[0] ?? ''}`);
+      throw new Error(`Datasource not found: ${resolvedDatasourceId}`);
     }
 
     const extension = ExtensionsRegistry.get(datasource.datasource_provider) as
