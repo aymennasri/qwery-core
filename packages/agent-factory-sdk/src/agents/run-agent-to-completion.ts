@@ -58,7 +58,7 @@ export async function runAgentToCompletion(
     model: modelInput,
     repositories,
     abortSignal,
-    maxSteps = 5,
+    maxSteps,
     datasources,
     mcpServerUrl,
     onAsk,
@@ -69,6 +69,8 @@ export async function runAgentToCompletion(
   if (!agentInfo) {
     throw new Error(`Agent not found: ${agentId}`);
   }
+
+  const resolvedMaxSteps = maxSteps ?? agentInfo.steps ?? 5;
 
   const loadedDatasources = await loadDatasources(
     datasources ?? [],
@@ -155,7 +157,7 @@ export async function runAgentToCompletion(
     model,
     messages: messagesForLlm,
     tools,
-    maxSteps,
+    maxSteps: resolvedMaxSteps,
     abortSignal,
     systemPrompt: agentInfo.systemPrompt,
     onFinish: closeMcp
