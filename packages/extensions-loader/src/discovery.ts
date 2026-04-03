@@ -35,6 +35,26 @@ export interface DiscoveredExtension {
   drivers: ContributesDriver[];
 }
 
+function resolveExistingExtensionFile(
+  extDir: string,
+  relativePath: string,
+  fallbackPaths: string[],
+): string {
+  const preferredPath = path.resolve(extDir, relativePath.replace(/^\.\//, ''));
+  if (fs.existsSync(preferredPath)) {
+    return preferredPath;
+  }
+
+  for (const fallbackPath of fallbackPaths) {
+    const candidate = path.resolve(extDir, fallbackPath);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return preferredPath;
+}
+
 function findMonorepoExtensionsPath(startDir: string): string | null {
   let dir = path.resolve(startDir);
   while (true) {
@@ -187,11 +207,19 @@ export function resolveDriverEntryPath(
 ): string {
   const bunEntry = 'Bun' in globalThis ? pkg?.exports?.['.']?.bun : undefined;
   const relative = String(bunEntry ?? entry ?? pkgMain ?? './dist/driver.js');
-  const absolute = path.resolve(extDir, relative.replace(/^\.\//, ''));
+  const absolute = resolveExistingExtensionFile(extDir, relative, [
+    'src/driver.ts',
+    'src/driver.js',
+    'src/extension.ts',
+    'src/extension.js',
+  ]);
   return pathToFileURL(absolute).href;
 }
 
 export function resolveSchemaPath(extDir: string): string {
-  const schemaPath = path.join(extDir, 'dist', 'schema.js');
+  const schemaPath = resolveExistingExtensionFile(extDir, 'dist/schema.js', [
+    'src/schema.ts',
+    'src/schema.js',
+  ]);
   return pathToFileURL(schemaPath).href;
 }

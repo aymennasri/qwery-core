@@ -431,6 +431,27 @@ describe('discovery', () => {
       expect(href).toMatch(/dist\/driver\.js$/);
     });
 
+    it('falls back to src/driver.ts when dist driver is missing', () => {
+      const extDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qwery-driver-src-'));
+      try {
+        fs.mkdirSync(path.join(extDir, 'src'), { recursive: true });
+        fs.writeFileSync(
+          path.join(extDir, 'src', 'driver.ts'),
+          'export const driverFactory = () => null;',
+        );
+
+        const href = resolveDriverEntryPath(
+          extDir,
+          './dist/driver.js',
+          undefined,
+        );
+
+        expect(href).toMatch(/src\/driver\.ts$/);
+      } finally {
+        fs.rmSync(extDir, { recursive: true, force: true });
+      }
+    });
+
     it('uses bun export when running under Bun and pkg has exports["."].bun', () => {
       vi.stubGlobal('Bun', {});
       try {
@@ -481,6 +502,24 @@ describe('discovery', () => {
       const href = resolveSchemaPath('/ext/dir');
       expect(href).toMatch(/dist\/schema\.js$/);
       expect(href).toMatch(/^file:/);
+    });
+
+    it('falls back to src/schema.ts when dist schema is missing', () => {
+      const extDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qwery-schema-src-'));
+      try {
+        fs.mkdirSync(path.join(extDir, 'src'), { recursive: true });
+        fs.writeFileSync(
+          path.join(extDir, 'src', 'schema.ts'),
+          'export const schema = null;',
+        );
+
+        const href = resolveSchemaPath(extDir);
+
+        expect(href).toMatch(/src\/schema\.ts$/);
+        expect(href).toMatch(/^file:/);
+      } finally {
+        fs.rmSync(extDir, { recursive: true, force: true });
+      }
     });
   });
 

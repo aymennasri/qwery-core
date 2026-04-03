@@ -391,6 +391,77 @@ describe('extensions-loader', () => {
       }
     });
 
+    it('loads a source driver when the dist build is missing', async () => {
+      const tempDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'qwery-src-driver-'),
+      );
+      try {
+        const extDir = path.join(tempDir, 'src-driver-ext');
+        fs.mkdirSync(path.join(extDir, 'src'), { recursive: true });
+        fs.writeFileSync(
+          path.join(extDir, 'package.json'),
+          JSON.stringify({
+            contributes: {
+              datasources: [
+                {
+                  id: 'src-driver-schema-test',
+                  name: 'Source Driver',
+                  drivers: ['src.driver'],
+                },
+              ],
+              drivers: [
+                {
+                  id: 'src.driver',
+                  name: 'Source Driver',
+                  runtime: 'node',
+                  entry: './dist/driver.js',
+                },
+              ],
+            },
+          }),
+        );
+        fs.writeFileSync(
+          path.join(extDir, 'src', 'driver.ts'),
+          `export const driverFactory = () => ({
+            async testConnection() {},
+            async query() {
+              return {
+                columns: [],
+                rows: [],
+                stat: { rowsAffected: 0, rowsRead: 0, rowsWritten: 0, queryDurationMs: null },
+              };
+            },
+            async metadata() {
+              return {
+                version: '0.0.1',
+                driver: 'src.driver',
+                schemas: [],
+                tables: [],
+                columns: [],
+              };
+            },
+          });
+          export default driverFactory;`,
+        );
+
+        registerExtensionsFromFolders([tempDir]);
+
+        const driverDescriptor = {
+          id: 'src.driver',
+          name: 'Source Driver',
+          runtime: 'node' as const,
+        };
+        const context: DriverContext = { config: {} };
+
+        const instance = await getDriverInstance(driverDescriptor, context);
+
+        expect(instance).toBeDefined();
+        expect(instance.testConnection).toBeDefined();
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('includes non-Error message when driver import throws non-Error', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qwery-throw-'));
       try {
