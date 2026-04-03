@@ -3623,6 +3623,29 @@
           "output": 131072
         }
       },
+      "minimax-m2.7": {
+        "id": "minimax-m2.7",
+        "name": "minimax-m2.7",
+        "family": "minimax",
+        "attachment": false,
+        "reasoning": true,
+        "tool_call": true,
+        "release_date": "2026-03-18",
+        "last_updated": "2026-03-18",
+        "open_weights": true,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "limit": {
+          "context": 204800,
+          "output": 131072
+        }
+      },
       "mistral-large-3:675b": {
         "id": "mistral-large-3:675b",
         "name": "mistral-large-3:675b",

@@ -47,6 +47,11 @@ export const SUPPORTED_MODELS = [
     value: 'ollama-cloud/minimax-m2.5',
   },
   {
+    name: 'Ollama Cloud • MiniMax M2.7',
+    shortName: 'MiniMax M2.7',
+    value: 'ollama-cloud/minimax-m2.7',
+  },
+  {
     name: 'Ollama Cloud • Mistral Large 3 675B',
     shortName: 'Mistral L3 675B',
     value: 'ollama-cloud/mistral-large-3:675b',
