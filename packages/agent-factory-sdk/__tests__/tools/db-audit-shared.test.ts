@@ -16,6 +16,14 @@ describe('db-audit shared guards', () => {
     ).not.toThrow();
   });
 
+  it('reports the calling tool for non-select explain targets', () => {
+    expect(() =>
+      assertExplainTargetSql('SET random_page_cost = 1.1', 'validate_remediation_in_gfs_cli'),
+    ).toThrow(
+      'validate_remediation_in_gfs_cli only accepts SELECT or WITH queries as input. Use actionStatements for SET/RESET or other write-capable SQL.',
+    );
+  });
+
   it('rejects write-capable SQL statements', () => {
     expect(() =>
       assertReadOnlySql('UPDATE users SET active = false'),

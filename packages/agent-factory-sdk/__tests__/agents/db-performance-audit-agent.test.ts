@@ -74,6 +74,12 @@ describe('DbPerformanceAuditAgent', () => {
       'SET LOCAL or SET for the current session',
     );
     expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
+      'validationQuery` must stay a read-only representative `SELECT` or `WITH` query',
+    );
+    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
+      'place `SET`/`RESET` statements in `actionStatements`',
+    );
+    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
       'provide only remediation alternatives that were executed in GFS',
     );
     expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
@@ -90,6 +96,21 @@ describe('DbPerformanceAuditAgent', () => {
     );
     expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
       'The Recommendation Testing Results table must contain only executed GFS validations',
+    );
+    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
+      'validation.assessment as authoritative',
+    );
+    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
+      'Do not promote a regressed or neutral GFS result into the executive summary, quick wins, or conclusion',
+    );
+    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
+      'If a validation benchmark is below 5ms total time before the change',
+    );
+    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
+      'If a tested candidate was rejected or inconclusive, do not include it as a recommendation row',
+    );
+    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
+      'Only include actions with successful GFS validation and recommendationStatus `validated`',
     );
   });
 

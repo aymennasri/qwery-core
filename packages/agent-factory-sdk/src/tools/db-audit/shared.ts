@@ -132,15 +132,18 @@ export async function resolveAttachedDatasource(
   return resolveDatasource(repositories, attachedDatasources);
 }
 
-export function assertExplainTargetSql(sql: string): void {
+export function assertExplainTargetSql(
+  sql: string,
+  toolName = 'explain_query_plan',
+): void {
   const normalized = stripComments(sql);
   if (!normalized) {
-    throw new Error('Query cannot be empty for explain_query_plan.');
+    throw new Error(`Query cannot be empty for ${toolName}.`);
   }
 
   if (!/^(SELECT|WITH)\b/i.test(normalized)) {
     throw new Error(
-      'explain_query_plan only accepts SELECT or WITH queries as input.',
+      `${toolName} only accepts SELECT or WITH queries as input. Use actionStatements for SET/RESET or other write-capable SQL.`,
     );
   }
 
