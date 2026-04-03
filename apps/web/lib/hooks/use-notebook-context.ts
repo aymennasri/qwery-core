@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { NOTEBOOK_CELL_TYPE } from '@qwery/agent-factory-sdk';
+import { NOTEBOOK_CELL_TYPE } from '@qwery/agent-factory-sdk/browser';
 import { useNotebookSidebar } from '~/lib/context/notebook-sidebar-context';
 import { useAgentStatus } from '@qwery/ui/ai';
 
