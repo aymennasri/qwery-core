@@ -211,6 +211,26 @@ export type InfraSignalsInput = {
   sourceNotes?: string[];
 };
 
+export type GfsValidationResult = {
+  recommendation: string;
+  validationType: 'latency' | 'config' | 'maintenance';
+  branchName: string;
+  checkpointCommit: string;
+  afterCommit: string;
+  actionTaken: string;
+  beforeTimeMs: number | null;
+  afterTimeMs: number | null;
+  beforeReadBlocks: number | null;
+  afterReadBlocks: number | null;
+  beforeHitBlocks: number | null;
+  afterHitBlocks: number | null;
+  deltaMs: number | null;
+  deltaPct: number | null;
+  recommendationStatus: 'validated' | 'rejected' | 'inconclusive';
+  benchmarkSuitability: 'latency-impact' | 'low-latency' | 'non-latency';
+  rollback: string;
+};
+
 export type BuildAuditReportInput = {
   engine: string;
   datasourceId?: string;
@@ -222,6 +242,7 @@ export type BuildAuditReportInput = {
   infraSignals?: InfraSignalsInput;
   lockSignals?: LockSignalsInput;
   configGaps?: ConfigGapInput;
+  gfsValidations?: GfsValidationResult[];
 };
 
 export type AuditTaskStatus = 'completed' | 'partial' | 'not-collected';
@@ -250,6 +271,8 @@ export type AuditReport = {
   findings: AuditFinding[];
   quickWins: string[];
   nextSteps: string[];
+  gfsValidations: GfsValidationResult[];
+  incompleteReason?: string;
 };
 
 const severityOrder: Record<AuditSeverity, number> = {
@@ -1284,6 +1307,28 @@ export function buildAuditReport(input: BuildAuditReportInput): AuditReport {
     { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
   );
 
+  const gfsValidations = input.gfsValidations ?? [];
+  const validatedCount = gfsValidations.filter(
+    (v) => v.recommendationStatus === 'validated',
+  ).length;
+  const rejectedCount = gfsValidations.filter(
+    (v) => v.recommendationStatus === 'rejected',
+  ).length;
+  const inconclusiveCount = gfsValidations.filter(
+    (v) => v.recommendationStatus === 'inconclusive',
+  ).length;
+  const untestedFindings = allFindings.filter(
+    (finding) =>
+      !gfsValidations.some((v) =>
+        v.recommendation.toLowerCase().includes(finding.title.toLowerCase()),
+      ),
+  );
+
+  const incompleteReason =
+    rejectedCount > 0 || inconclusiveCount > 0 || untestedFindings.length > 0
+      ? `Audit incomplete: ${rejectedCount} rejected, ${inconclusiveCount} inconclusive, ${untestedFindings.length} untested finding(s) out of ${allFindings.length} total.`
+      : undefined;
+
   return {
     engine: input.engine,
     generatedAt: new Date().toISOString(),
@@ -1298,5 +1343,7 @@ export function buildAuditReport(input: BuildAuditReportInput): AuditReport {
     findings: allFindings,
     quickWins: createQuickWins(input, allFindings),
     nextSteps: createNextSteps(allFindings, input.infraSignals),
+    gfsValidations,
+    incompleteReason,
   };
 }

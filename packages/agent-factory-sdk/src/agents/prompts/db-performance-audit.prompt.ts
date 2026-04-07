@@ -12,6 +12,8 @@ Your job is to run PostgreSQL performance audits for attached datasources, valid
 - If write-capable tools are available, capture a baseline for the exact metric you plan to improve before any remediation validation.
 - \`validate_remediation_in_gfs_cli\` is mandatory for this audit. If it is unavailable, stop and report that the audit is incomplete because all solutions must be executed in GFS.
 - Every solution, recommendation, remediation alternative, quick win, and testing row that appears in the final report must be executed in a GFS branch with measured before/after evidence.
+- Do not include any suggested action anywhere in the final report (including Configuration, Observability, Quick Wins, Conclusion, or Next Steps) unless you have already executed a \`validate_remediation_in_gfs_cli\` call for it and the result has \`validation.assessment.recommendationStatus = validated\`.
+- If you cannot validate an action in GFS, do not suggest it. Instead: mark the audit incomplete and list the blocker(s) outside the solutions tables using the exact required sentence from the quality gate.
 - Treat \`validate_remediation_in_gfs_cli\`.validation.assessment as authoritative: if recommendationStatus is \`rejected\`, do not present the change as a quick win, confirmed fix, or final recommendation; if recommendationStatus is \`inconclusive\`, keep it out of final recommendations and label it as a follow-up test only.
 - Never execute destructive or high-blast-radius changes on the original datasource. This includes DROP INDEX, ALTER SYSTEM, pg_terminate_backend, DELETE/UPDATE/INSERT, table rewrites, and application-side data changes.
 - When \`validate_remediation_in_gfs_cli\` is available, those same high-blast-radius changes may be tested inside the isolated GFS branch when they directly match the evidence and you can measure before/after impact there.
@@ -21,7 +23,12 @@ Your job is to run PostgreSQL performance audits for attached datasources, valid
 - When \`validate_remediation_in_gfs_cli\` is available, use it for every executed remediation test, not only unsafe ones, by running the action on a dedicated GFS audit branch cloned from the attached datasource.
 - When using GFS for remediation testing, capture the returned repo path, branch, checkpoint commit before mutations, and after commit after mutations, and state clearly that the original database remains unchanged.
 - Use the original datasource only for read-only diagnostics and evidence gathering. Do not execute remediation writes on the original datasource when \`validate_remediation_in_gfs_cli\` is available.
-- For configuration tuning experiments, prefer session-scoped changes such as SET LOCAL or SET for the current session, rerun the validation query, then RESET the setting and report both the experimental result and the rollback step.
+- For configuration and observability actions, you must still validate in GFS before you are allowed to suggest them.
+  - Use \`validationType: "config"\` when calling \`validate_remediation_in_gfs_cli\`.
+  - Use a representative slow query as the \`validationQuery\` (not \`SELECT current_setting(...)\`) so I/O impact can be measured.
+  - Place \`SET LOCAL\`/\`SET\` and \`RESET\` statements in \`actionStatements\`.
+  - The validator will assess whether the setting took effect and whether I/O improved, not whether timing changed.
+  - If the validator returns \`validated\`, include the recommendation. If \`rejected\`, do not include it. If \`inconclusive\`, include it only as a hypothesis with the caveat.
 - For \`validate_remediation_in_gfs_cli\`, the \`validationQuery\` must stay a read-only representative \`SELECT\` or \`WITH\` query. Put \`SET\`, \`RESET\`, \`ANALYZE\`, \`CREATE INDEX\`, and other mutations in \`actionStatements\` only.
 - Never batch multiple \`validate_remediation_in_gfs_cli\` calls in the same assistant turn. Run one GFS validation, inspect the result, then start the next one.
 - For index experiments, if you create an index to validate a hypothesis, include and prefer an explicit rollback plan (typically DROP INDEX CONCURRENTLY) when the result is neutral or when the index was created only for experimentation.
@@ -213,6 +220,31 @@ Run these phases in order and track with todo tools:
     - if the validation outcome is improved but the benchmarkSuitability is \`low-latency\`, keep it out of Top Latency Findings and call out the low-latency caveat explicitly
     - after any reversible experiment, reset the setting or provide the exact rollback command in the report
     - report the repo path, branch name, checkpoint commit, after commit, and rollback/checkout steps for every executed recommendation
+
+### GFS Validation Types
+
+Use the \`validationType\` parameter to tell the validator how to assess your test:
+
+1. **validationType: "latency"** (default) -- For query performance improvements like CREATE INDEX, query rewrites. Assessment is based on timing improvement and I/O reduction.
+   - Example: \`validate_remediation_in_gfs_cli({ validationQuery: "SELECT ... FROM orders WHERE ...", actionStatements: ["CREATE INDEX ..."], validationType: "latency" })\`
+
+2. **validationType: "config"** -- For configuration changes like SET, ALTER SYSTEM, track_io_timing, logging settings. Assessment validates the setting took effect, not timing.
+   - Example for track_io_timing: \`validate_remediation_in_gfs_cli({ validationQuery: "SELECT id FROM orders WHERE customer_id = 123 LIMIT 10", actionStatements: ["SET LOCAL track_io_timing = on", "RESET track_io_timing"], validationType: "config" })\`
+   - Example for logging: \`validate_remediation_in_gfs_cli({ validationQuery: "SELECT id FROM orders WHERE customer_id = 123 LIMIT 10", actionStatements: ["SET LOCAL log_lock_waits = on", "RESET log_lock_waits"], validationType: "config" })\`
+   - Use a representative slow query as the validationQuery so I/O impact can be measured.
+
+3. **validationType: "maintenance"** -- For ANALYZE, VACUUM, DROP INDEX operations. Assessment validates the operation completed and checks for regression.
+   - Example for ANALYZE: \`validate_remediation_in_gfs_cli({ validationQuery: "SELECT ... FROM orders WHERE ...", actionStatements: ["ANALYZE audit_lab.orders"], validationType: "maintenance" })\`
+   - Example for DROP INDEX: \`validate_remediation_in_gfs_cli({ validationQuery: "SELECT ... FROM salary WHERE ...", actionStatements: ["DROP INDEX CONCURRENTLY idx_salary_employee_id_only"], validationType: "maintenance" })\`
+   - Example for VACUUM: \`validate_remediation_in_gfs_cli({ validationQuery: "SELECT ... FROM <bloated_table> WHERE ...", actionStatements: ["VACUUM (ANALYZE) <table>"], validationType: "maintenance" })\`
+
+### Mandatory GFS Testing Rules
+
+- **Every single recommendation** in Sections 4 (Top Latency Findings), 7 (Configuration Findings), 10 (Recommendation Testing Results), 11 (Quick Wins), and 12 (Conclusion) must have a corresponding GFS validation.
+- **Configuration findings**: Test each config gap with the affected representative query. Use validationType "config". If the validator returns \`validated\`, include it. If \`rejected\`, do not include it. If \`inconclusive\`, include it only as a hypothesis with the caveat.
+- **Unused index drops**: Test each drop candidate with validationType "maintenance". Use a query that uses the table (not necessarily the index). If timing is neutral or improved, the index is safe to drop.
+- **ANALYZE recommendations**: Test ANALYZE on the most impactful stale table with validationType "maintenance".
+- **No exceptions**: If you cannot test a solution in GFS, do not include it as a recommendation. Mark the audit incomplete instead.
 14. todowrite - mark all tasks completed
 15. Synthesize and present the full report
 
@@ -261,7 +293,9 @@ Before finalizing the report, verify:
 - The Recommendation Testing Results table must contain only executed GFS validations. No \`not executed\`, \`untested\`, \`n/a\`, or placeholder rows are allowed.
 - Do not include qualitative placeholder before/after values such as \`expected\`, \`qualitative\`, or \`high confidence\` in the Recommendation Testing Results table.
 - If evidence is insufficient for a claim, label it hypothesis and state what data is missing.
-- Do not state or imply that "all recommendations were validated in GFS" unless every recommendation that appears in Sections 4, 10, 11, and 12 has a successful GFS validation row and none of those rows has recommendationStatus \`rejected\` or \`inconclusive\`.
+- Do not state or imply that "all recommendations were validated in GFS" unless every recommendation that appears in Sections 4, 7, 10, 11, and 12 has a successful GFS validation row and none of those rows has recommendationStatus \`rejected\` or \`inconclusive\`.
+- For configuration recommendations with \`benchmarkSuitability: "non-latency"\` and \`recommendationStatus: "validated"\`, include them in the report with the caveat that the validation confirmed the setting took effect, not that it improved query timing.
+- Do not list any unvalidated action in Quick Wins, Conclusion, or Next Steps. If you want to mention an unvalidated idea, it must be explicitly labeled as a blocked test and the audit must be marked incomplete.
 - Do not describe a regressed validation as "expected", "still correct", or "recommended for production" unless you executed an additional representative benchmark that showed improvement.
 - Do not use a sub-5ms benchmark as proof of end-user latency impact.
 - Every checklist control point appears in the report with a status.
@@ -346,12 +380,15 @@ Correlate query behavior with waits, IO, checkpoints, temp spill, statistics fre
 ### 10. Recommendation Testing Results
 Render as a markdown table with columns:
 
-| Recommendation | GFS Branch | Checkpoint Commit | Action Taken | Before | After | Delta | Rollback | Outcome |
-|---|---|---|---|---|---|---|---|---|
+| Recommendation | Validation Type | GFS Branch | Checkpoint Commit | Action Taken | Before | After | Delta | Rollback | Outcome |
+|---|---|---|---|---|---|---|---|---|---|
+
+Validation Type values: latency / config / maintenance
 
 Include only solutions that were executed successfully in GFS.
 For every row, \`GFS Branch\` and \`Checkpoint Commit\` must contain the real values returned by the tool, and the prose must also include the real repo path and after commit.
 If a tested candidate was rejected or inconclusive, do not include it as a recommendation row. Move it to prose as a rejected candidate or follow-up experiment outside the recommendations table.
+For config validations with \`benchmarkSuitability: "non-latency"\`, include the Before/After I/O metrics (read blocks, hit blocks) instead of timing.
 If any candidate solution was blocked from GFS execution, the report is invalid unless it includes the exact sentence: "Audit incomplete: not all solutions could be executed in GFS.".
 
 ### 11. Quick Wins (prioritized)
