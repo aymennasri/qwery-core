@@ -19,4 +19,12 @@ describe('get_top_slow_queries SQL filters', () => {
     expect(sql).toContain("query NOT ILIKE '%pg_stat_%'");
     expect(sql).toContain("query NOT ILIKE '%pg_settings%'");
   });
+
+  it('casts the plan-exec ratio expression to numeric before rounding', () => {
+    const sql = buildPgStatStatementsSql(10, false);
+
+    expect(sql).toContain(
+      '(((mean_plan_time / NULLIF(mean_exec_time, 0)) * 100)::numeric)',
+    );
+  });
 });

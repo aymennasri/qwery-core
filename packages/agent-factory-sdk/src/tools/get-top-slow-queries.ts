@@ -76,7 +76,10 @@ export function buildPgStatStatementsSql(
       ${totalPlanCol}::double precision                                    AS total_plan_time_ms,
       CASE
         WHEN calls > 0 AND ${meanTimeCol} > 0
-        THEN ROUND((${meanPlanCol}::numeric / NULLIF(${meanTimeCol}, 0)) * 100, 2)
+        THEN ROUND(
+          (((${meanPlanCol} / NULLIF(${meanTimeCol}, 0)) * 100)::numeric),
+          2
+        )
         ELSE NULL
       END                                                                  AS plan_exec_ratio_pct,
       rows,

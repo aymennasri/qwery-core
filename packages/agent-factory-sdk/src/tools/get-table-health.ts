@@ -12,28 +12,8 @@ import { Tool } from './tool';
 const DESCRIPTION =
   'Collect PostgreSQL table-health metrics: size, dead tuples, scan profile, maintenance counters, temporal vacuum/analyze timestamps, rows modified since last analyze, and per-table autovacuum overrides.';
 
-export const GetTableHealthTool = Tool.define('get_table_health', {
-  description: DESCRIPTION,
-  parameters: z.object({
-    limit: z
-      .number()
-      .int()
-      .positive()
-      .max(100)
-      .optional()
-      .describe('Maximum number of tables to inspect (default: 20).'),
-  }),
-  async execute(params, ctx) {
-    const limit = toSafeLimit(params.limit, 20, 100);
-
-    return withDatasourceDriver(ctx, async ({ datasource, query }) => {
-      if (!isPostgresDatasource(datasource)) {
-        throw new Error(
-          `db-performance-audit currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
-        );
-      }
-
-      const result = await query(`
+export function buildTableHealthSql(limit: number): string {
+  return `
         SELECT
           stats.schemaname,
           stats.relname                                                           AS table_name,
@@ -72,20 +52,42 @@ export const GetTableHealthTool = Tool.define('get_table_health', {
           stats.last_autovacuum,
           stats.last_analyze,
           stats.last_autoanalyze,
-          GREATEST(stats.last_vacuum, stats.last_autovacuum)                      AS most_recent_vacuum,
-          GREATEST(stats.last_analyze, stats.last_autoanalyze)                    AS most_recent_analyze,
-          EXTRACT(EPOCH FROM
-            (now() - COALESCE(
-              GREATEST(stats.last_vacuum, stats.last_autovacuum),
-              '-infinity'::timestamptz
-            ))
-          )::double precision                                                      AS seconds_since_vacuum,
-          EXTRACT(EPOCH FROM
-            (now() - COALESCE(
-              GREATEST(stats.last_analyze, stats.last_autoanalyze),
-              '-infinity'::timestamptz
-            ))
-          )::double precision                                                      AS seconds_since_analyze,
+          CASE
+            WHEN stats.last_vacuum IS NOT NULL OR stats.last_autovacuum IS NOT NULL
+            THEN GREATEST(
+              COALESCE(stats.last_vacuum, '-infinity'::timestamptz),
+              COALESCE(stats.last_autovacuum, '-infinity'::timestamptz)
+            )
+            ELSE NULL
+          END                                                                     AS most_recent_vacuum,
+          CASE
+            WHEN stats.last_analyze IS NOT NULL OR stats.last_autoanalyze IS NOT NULL
+            THEN GREATEST(
+              COALESCE(stats.last_analyze, '-infinity'::timestamptz),
+              COALESCE(stats.last_autoanalyze, '-infinity'::timestamptz)
+            )
+            ELSE NULL
+          END                                                                     AS most_recent_analyze,
+          CASE
+            WHEN stats.last_vacuum IS NOT NULL OR stats.last_autovacuum IS NOT NULL
+            THEN EXTRACT(EPOCH FROM (
+              now() - GREATEST(
+                COALESCE(stats.last_vacuum, '-infinity'::timestamptz),
+                COALESCE(stats.last_autovacuum, '-infinity'::timestamptz)
+              )
+            ))::double precision
+            ELSE NULL
+          END                                                                     AS seconds_since_vacuum,
+          CASE
+            WHEN stats.last_analyze IS NOT NULL OR stats.last_autoanalyze IS NOT NULL
+            THEN EXTRACT(EPOCH FROM (
+              now() - GREATEST(
+                COALESCE(stats.last_analyze, '-infinity'::timestamptz),
+                COALESCE(stats.last_autoanalyze, '-infinity'::timestamptz)
+              )
+            ))::double precision
+            ELSE NULL
+          END                                                                     AS seconds_since_analyze,
           reloptions.autovacuum_enabled_override,
           reloptions.autovacuum_vacuum_scale_factor_override,
           reloptions.autovacuum_analyze_scale_factor_override,
@@ -106,7 +108,31 @@ export const GetTableHealthTool = Tool.define('get_table_health', {
         ) reloptions ON TRUE
         ORDER BY pg_total_relation_size(stats.relid) DESC
         LIMIT ${limit}
-      `);
+      `;
+}
+
+export const GetTableHealthTool = Tool.define('get_table_health', {
+  description: DESCRIPTION,
+  parameters: z.object({
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .max(100)
+      .optional()
+      .describe('Maximum number of tables to inspect (default: 20).'),
+  }),
+  async execute(params, ctx) {
+    const limit = toSafeLimit(params.limit, 20, 100);
+
+    return withDatasourceDriver(ctx, async ({ datasource, query }) => {
+      if (!isPostgresDatasource(datasource)) {
+        throw new Error(
+          `db-performance-audit currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
+        );
+      }
+
+      const result = await query(buildTableHealthSql(limit));
 
       return {
         limit,
