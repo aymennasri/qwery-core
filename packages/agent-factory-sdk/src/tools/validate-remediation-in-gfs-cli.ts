@@ -115,6 +115,17 @@ type EnsuredGfsBaseline = {
   computeRunning: boolean;
 };
 
+type PartitionedActionStatements = {
+  persistentStatements: string[];
+  sessionSetupStatements: string[];
+  sessionTeardownStatements: string[];
+};
+
+type DirectoryLockOptions = {
+  waitOnBusy?: boolean;
+  busyMessage?: string;
+};
+
 function sanitizeBranchName(value: string): string {
   const sanitized = value
     .trim()
@@ -152,13 +163,84 @@ function buildExplainSql(query: string): string {
   return `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${trimmed}`;
 }
 
-function parseExplainRoot(raw: string): Record<string, unknown> {
+function isSessionSetupStatement(statement: string): boolean {
+  return /^SET(?:\s+LOCAL|\s+SESSION)?\b/i.test(statement);
+}
+
+function isSessionTeardownStatement(statement: string): boolean {
+  return /^RESET(?:\s+ALL)?\b/i.test(statement);
+}
+
+function partitionActionStatements(
+  actionStatements: string[],
+): PartitionedActionStatements {
+  const persistentStatements: string[] = [];
+  const sessionSetupStatements: string[] = [];
+  const sessionTeardownStatements: string[] = [];
+
+  for (const statement of actionStatements) {
+    if (isSessionTeardownStatement(statement)) {
+      sessionTeardownStatements.push(statement);
+      continue;
+    }
+
+    if (isSessionSetupStatement(statement)) {
+      sessionSetupStatements.push(statement);
+      continue;
+    }
+
+    persistentStatements.push(statement);
+  }
+
+  return {
+    persistentStatements,
+    sessionSetupStatements,
+    sessionTeardownStatements,
+  };
+}
+
+function buildSessionScopedExplainSql(input: {
+  validationQuery: string;
+  sessionSetupStatements: string[];
+  sessionTeardownStatements: string[];
+}): string {
+  const needsTransaction = input.sessionSetupStatements.some((statement) =>
+    /^SET\s+LOCAL\b/i.test(statement),
+  );
+  const statements = [
+    ...(needsTransaction ? ['BEGIN'] : []),
+    ...input.sessionSetupStatements,
+    buildExplainSql(input.validationQuery),
+    ...input.sessionTeardownStatements,
+    ...(needsTransaction ? ['COMMIT'] : []),
+  ];
+
+  return statements
+    .map((statement) => statement.trim().replace(/;\s*$/, ''))
+    .join(';\n');
+}
+
+function extractExplainJsonPayload(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) {
     throw new Error('EXPLAIN ANALYZE returned no output.');
   }
 
-  const parsed = JSON.parse(trimmed) as unknown;
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    return trimmed;
+  }
+
+  const firstBracket = trimmed.indexOf('[');
+  const lastBracket = trimmed.lastIndexOf(']');
+  if (firstBracket === -1 || lastBracket === -1 || lastBracket < firstBracket) {
+    throw new Error('EXPLAIN ANALYZE output did not include JSON payload.');
+  }
+
+  return trimmed.slice(firstBracket, lastBracket + 1);
+}
+
+function parseExplainRoot(raw: string): Record<string, unknown> {
+  const parsed = JSON.parse(extractExplainJsonPayload(raw)) as unknown;
   if (!Array.isArray(parsed) || parsed.length === 0) {
     throw new Error('EXPLAIN ANALYZE JSON output was not an array.');
   }
@@ -419,6 +501,7 @@ async function withDirectoryLock<T>(
   lockDir: string,
   signal: AbortSignal,
   fn: () => Promise<T>,
+  options: DirectoryLockOptions = {},
 ): Promise<T> {
   const startedAt = Date.now();
 
@@ -446,6 +529,13 @@ async function withDirectoryLock<T>(
         }
       } catch {
         // The lock may have been released between stat attempts.
+      }
+
+      if (options.waitOnBusy === false) {
+        throw new Error(
+          options.busyMessage ??
+            'Another operation is already using this cached GFS baseline.',
+        );
       }
 
       await waitForAbortableDelay(GFS_BASELINE_LOCK_WAIT_STEP_MS, signal);
@@ -1080,13 +1170,17 @@ export const __testables = {
   buildBaselineCacheKey,
   buildBranchNameWithSuffix,
   buildBootstrapBinaryCandidates,
+  buildSessionScopedExplainSql,
   buildVersionedBinaryCandidates,
+  extractExplainJsonPayload,
   isRetryablePostgresStartupError,
+  partitionActionStatements,
   parseExplainPlanSummary,
   parseCommitHash,
   parseExplainMetrics,
   parsePostgresClientMajorVersion,
   resolveGfsAuditWorkingRoot,
+  withDirectoryLock,
 };
 
 async function readGfsStatus(
@@ -1177,6 +1271,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
       const actionStatements = params.actionStatements.map(
         normalizeActionStatement,
       );
+      const partitionedStatements = partitionActionStatements(actionStatements);
 
       const logger = await getLogger();
       const { datasource } = await resolveAttachedDatasource(ctx);
@@ -1229,6 +1324,9 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
         },
         'Starting GFS CLI remediation validation',
       );
+
+      const concurrentValidationMessage =
+        'Another GFS remediation validation is already running for this datasource in this conversation. Run validate_remediation_in_gfs_cli one recommendation at a time.';
 
       return withDirectoryLock(lockDir, ctx.abort, async () => {
         let shouldStopCompute = false;
@@ -1309,25 +1407,26 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             ),
           );
 
-          const executedActions: string[] = [];
-          for (const statement of actionStatements) {
+          const executedActions = [...actionStatements];
+          for (const statement of partitionedStatements.persistentStatements) {
             await runPsqlWithRetry(
               baseline.psqlBinary,
               statusBefore.connectionUrl,
               statement,
               ctx.abort,
             );
-            executedActions.push(statement);
           }
 
-          await runCommand(
-            'gfs',
-            ['commit', '-m', 'apply audit remediation candidate'],
-            {
-              cwd: activeRepoPath,
-              signal: ctx.abort,
-            },
-          );
+          if (partitionedStatements.persistentStatements.length > 0) {
+            await runCommand(
+              'gfs',
+              ['commit', '-m', 'apply audit remediation candidate'],
+              {
+                cwd: activeRepoPath,
+                signal: ctx.abort,
+              },
+            );
+          }
 
           const afterCommit = await readLatestCommitHash(activeRepoPath, ctx.abort);
           const statusAfter = await readGfsConnectionUrl(activeRepoPath, ctx.abort);
@@ -1336,11 +1435,22 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             statusAfter.connectionUrl,
             ctx.abort,
           );
+          const afterExplainSql =
+            partitionedStatements.sessionSetupStatements.length > 0 ||
+            partitionedStatements.sessionTeardownStatements.length > 0
+              ? buildSessionScopedExplainSql({
+                  validationQuery: params.validationQuery,
+                  sessionSetupStatements:
+                    partitionedStatements.sessionSetupStatements,
+                  sessionTeardownStatements:
+                    partitionedStatements.sessionTeardownStatements,
+                })
+              : buildExplainSql(params.validationQuery);
           const after = parseExplainAnalysis(
             await runPsqlWithRetry(
               baseline.psqlBinary,
               statusAfter.connectionUrl,
-              buildExplainSql(params.validationQuery),
+              afterExplainSql,
               ctx.abort,
             ),
           );
@@ -1403,6 +1513,9 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             });
           }
         }
+      }, {
+        waitOnBusy: false,
+        busyMessage: concurrentValidationMessage,
       });
     },
   },

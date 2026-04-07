@@ -80,6 +80,9 @@ describe('DbPerformanceAuditAgent', () => {
       'place `SET`/`RESET` statements in `actionStatements`',
     );
     expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
+      'Never batch multiple `validate_remediation_in_gfs_cli` calls in the same assistant turn',
+    );
+    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
       'provide only remediation alternatives that were executed in GFS',
     );
     expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(

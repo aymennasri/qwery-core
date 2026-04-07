@@ -1,3 +1,6 @@
+import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { __testables } from '../../src/tools/validate-remediation-in-gfs-cli';
 
@@ -172,6 +175,93 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
         ),
       ),
     ).toBe(false);
+  });
+
+  it('partitions session-scoped and persistent action statements', () => {
+    expect(
+      __testables.partitionActionStatements([
+        "SET work_mem = '256MB'",
+        'ANALYZE orders',
+        'CREATE INDEX idx_orders_status ON orders (status)',
+        'RESET work_mem',
+      ]),
+    ).toEqual({
+      persistentStatements: [
+        'ANALYZE orders',
+        'CREATE INDEX idx_orders_status ON orders (status)',
+      ],
+      sessionSetupStatements: ["SET work_mem = '256MB'"],
+      sessionTeardownStatements: ['RESET work_mem'],
+    });
+  });
+
+  it('builds a single-session benchmark script for SET LOCAL experiments', () => {
+    expect(
+      __testables.buildSessionScopedExplainSql({
+        validationQuery: 'SELECT * FROM orders WHERE status = $1',
+        sessionSetupStatements: ["SET LOCAL work_mem = '256MB'"],
+        sessionTeardownStatements: ['RESET work_mem'],
+      }),
+    ).toBe(
+      [
+        'BEGIN',
+        "SET LOCAL work_mem = '256MB'",
+        'EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT * FROM orders WHERE status = $1',
+        'RESET work_mem',
+        'COMMIT',
+      ].join(';\n'),
+    );
+  });
+
+  it('extracts EXPLAIN JSON from session-scoped psql output', () => {
+    const json = '[{"Plan":{"Node Type":"Aggregate"},"Planning Time":0.1,"Execution Time":1.2}]';
+
+    expect(
+      __testables.extractExplainJsonPayload(
+        ['BEGIN', 'SET', json, 'RESET', 'COMMIT'].join('\n'),
+      ),
+    ).toBe(json);
+  });
+
+  it('fails fast when another validation already holds the baseline lock', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gfs-lock-'));
+    const lockDir = join(root, 'baseline.lock');
+    const signal = new AbortController().signal;
+
+    let releaseLock: (() => void) | undefined;
+    const lockHeld = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+
+    const first = __testables.withDirectoryLock(lockDir, signal, async () => {
+      await lockHeld;
+      return 'done';
+    });
+
+    for (let attempt = 0; attempt < 20; attempt++) {
+      try {
+        await stat(lockDir);
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+
+    await expect(
+      __testables.withDirectoryLock(
+        lockDir,
+        signal,
+        async () => 'unreachable',
+        {
+          waitOnBusy: false,
+          busyMessage: 'busy lock',
+        },
+      ),
+    ).rejects.toThrow('busy lock');
+
+    releaseLock?.();
+    await expect(first).resolves.toBe('done');
+    await rm(root, { recursive: true, force: true });
   });
 
   it('parses root plan details from EXPLAIN JSON output', () => {

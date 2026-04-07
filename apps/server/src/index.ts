@@ -39,6 +39,21 @@ const raw =
   'workspace';
 process.env.WORKSPACE = isAbsolute(raw) ? raw : resolve(serverRoot, raw);
 
+const containerHostOverride =
+  process.env.CONTAINER_HOST?.trim() || process.env.DOCKER_HOST?.trim();
+const runtimeDir =
+  process.env.XDG_RUNTIME_DIR?.trim() ||
+  (typeof process.getuid === 'function' ? `/run/user/${process.getuid()}` : '');
+const podmanSocketPath = runtimeDir ? join(runtimeDir, 'podman', 'podman.sock') : '';
+const shouldPreferRootlessPodman =
+  !containerHostOverride && podmanSocketPath && existsSync(podmanSocketPath);
+
+if (shouldPreferRootlessPodman) {
+  const podmanSocketUrl = `unix://${podmanSocketPath}`;
+  process.env.DOCKER_HOST = podmanSocketUrl;
+  process.env.CONTAINER_HOST = podmanSocketUrl;
+}
+
 const PORT = Number(process.env.PORT ?? 4096);
 const HOSTNAME = process.env.HOSTNAME ?? '0.0.0.0';
 
@@ -47,6 +62,13 @@ const extensionsCount = ExtensionsRegistry.list(
   ExtensionScope.DATASOURCE,
 ).length;
 logger.info(`Discovered ${extensionsCount} datasource extensions`);
+
+if (shouldPreferRootlessPodman) {
+  logger.info(
+    { dockerHost: process.env.DOCKER_HOST },
+    'Using rootless Podman socket for container-backed tools',
+  );
+}
 
 const app = createApp();
 
