@@ -471,44 +471,6 @@ function createInfraEvidence(
   return evidence;
 }
 
-function createInfraQuickWins(infraSignals?: InfraSignalsInput): string[] {
-  if (!infraSignals) return [];
-
-  const quickWins: string[] = [];
-  const utilizationPct = infraSignals.connection?.utilizationPct;
-  const lockWaitSessions = infraSignals.waits?.lockWaitSessions;
-  const networkWaitSessions =
-    infraSignals.network?.networkWaitSessions ??
-    infraSignals.waits?.networkWaitSessions;
-  const cacheHitPct = infraSignals.io?.cacheHitPct;
-
-  if (typeof utilizationPct === 'number' && utilizationPct >= 75) {
-    quickWins.push(
-      `Review connection pooling and session churn (utilization ${utilizationPct.toFixed(2)}%).`,
-    );
-  }
-
-  if (typeof lockWaitSessions === 'number' && lockWaitSessions > 0) {
-    quickWins.push(
-      'Capture blocker chains with pg_blocking_pids() during peak windows and shorten transaction scope.',
-    );
-  }
-
-  if (typeof networkWaitSessions === 'number' && networkWaitSessions > 0) {
-    quickWins.push(
-      'Correlate ClientRead/ClientWrite waits with application round trips and network latency.',
-    );
-  }
-
-  if (typeof cacheHitPct === 'number' && cacheHitPct < 97) {
-    quickWins.push(
-      `Investigate shared buffer efficiency (cache hit ${cacheHitPct.toFixed(2)}%) alongside sequential-scan-heavy queries.`,
-    );
-  }
-
-  return quickWins;
-}
-
 function createFindingFromPlanInsight(
   insight: PlanInsightInput,
   index: number,
@@ -974,72 +936,54 @@ function createConfigGapFindings(config: ConfigGapInput): AuditFinding[] {
 function createQuickWins(
   input: BuildAuditReportInput,
   findings: AuditFinding[],
+  gfsValidations: GfsValidationResult[],
 ): string[] {
-  const quickWins: string[] = [...createInfraQuickWins(input.infraSignals)];
+  const validatedQuickWins = gfsValidations
+    .filter((validation) => validation.recommendationStatus === 'validated')
+    .map((validation) => `Validated in GFS: ${validation.recommendation}`);
 
-  const topSlow = (input.slowQueries ?? [])[0];
-  if (topSlow) {
-    quickWins.push(
-      `Prioritize plan analysis for the slowest captured query (source: ${topSlow.source ?? 'unknown'}).`,
-    );
-  }
-
-  const hotTable = input.indexHealth?.highSeqScanTables?.[0];
-  if (hotTable) {
-    quickWins.push(
-      `Investigate index coverage for ${hotTable.schema}.${hotTable.table} (seq scan ratio ${hotTable.seqScanRatio.toFixed(2)}%).`,
-    );
-  }
-
-  const deadTupleTable = (input.tableHealth ?? []).find(
-    (table) => table.deadTuplePct >= 20,
-  );
-  if (deadTupleTable) {
-    quickWins.push(
-      `Check autovacuum and table maintenance for ${deadTupleTable.schema}.${deadTupleTable.table} (dead tuple ${deadTupleTable.deadTuplePct.toFixed(2)}%).`,
-    );
+  if (validatedQuickWins.length > 0) {
+    return Array.from(new Set(validatedQuickWins)).slice(0, 5);
   }
 
   if (findings.length === 0) {
-    quickWins.push(
-      'Collect EXPLAIN ANALYZE evidence for at least one user-facing slow query.',
-    );
+    return [];
   }
 
-  return Array.from(new Set(quickWins)).slice(0, 5);
+  return [];
 }
 
 function createNextSteps(
   findings: AuditFinding[],
-  infraSignals?: InfraSignalsInput,
+  gfsValidations: GfsValidationResult[] = [],
 ): string[] {
-  const includeCrossLayerStep =
-    (infraSignals?.network?.networkWaitSessions ??
-      infraSignals?.waits?.networkWaitSessions ??
-      0) > 0 ||
-    (infraSignals?.waits?.lockWaitSessions ?? 0) > 0 ||
-    (infraSignals?.connection?.utilizationPct ?? 0) >= 75;
+  const validatedNextSteps = gfsValidations
+    .filter((validation) => validation.recommendationStatus === 'validated')
+    .map(
+      (validation) =>
+        `Use the validated GFS evidence for ${validation.recommendation.toLowerCase()} before any rollout decision.`,
+    );
 
-  if (findings.length === 0) {
-    const steps = [
-      'Capture top slow queries from current workload and run explain_query_plan.',
-      'Rebuild the audit report once plan+metric evidence is available.',
-    ];
-    if (includeCrossLayerStep) {
-      steps.push(
-        'Capture VM/OS/network metrics in the same window to confirm whether bottlenecks are database-local or external.',
-      );
-    }
-    return steps.slice(0, 3);
+  if (validatedNextSteps.length > 0) {
+    return Array.from(new Set(validatedNextSteps)).slice(0, 3);
   }
 
-  return [
-    'Apply one preferred remediation on a staging environment first.',
-    'Run the before/after EXPLAIN ANALYZE validation pair for each changed query.',
-    includeCrossLayerStep
-      ? 'Correlate query latency windows with VM/OS/network telemetry before production rollout.'
-      : 'Re-run the audit and compare severity distribution for latency improvements.',
-  ];
+  if (findings.length === 0) {
+    return [];
+  }
+
+  return [];
+}
+
+function sanitizeFindingRecommendations(
+  findings: AuditFinding[],
+): AuditFinding[] {
+  return findings.map((finding) => ({
+    ...finding,
+    recommendation:
+      'Remediation details are reported only through executed GFS validations.',
+    sql: undefined,
+  }));
 }
 
 function createAuditTasks(input: BuildAuditReportInput): AuditTask[] {
@@ -1299,6 +1243,8 @@ export function buildAuditReport(input: BuildAuditReportInput): AuditReport {
     })
     .slice(0, 20);
 
+  const sanitizedFindings = sanitizeFindingRecommendations(allFindings);
+
   const severitySummary = allFindings.reduce(
     (summary, finding) => {
       summary[finding.severity] += 1;
@@ -1317,16 +1263,11 @@ export function buildAuditReport(input: BuildAuditReportInput): AuditReport {
   const inconclusiveCount = gfsValidations.filter(
     (v) => v.recommendationStatus === 'inconclusive',
   ).length;
-  const untestedFindings = allFindings.filter(
-    (finding) =>
-      !gfsValidations.some((v) =>
-        v.recommendation.toLowerCase().includes(finding.title.toLowerCase()),
-      ),
-  );
-
   const incompleteReason =
-    rejectedCount > 0 || inconclusiveCount > 0 || untestedFindings.length > 0
-      ? `Audit incomplete: ${rejectedCount} rejected, ${inconclusiveCount} inconclusive, ${untestedFindings.length} untested finding(s) out of ${allFindings.length} total.`
+    rejectedCount > 0 ||
+    inconclusiveCount > 0 ||
+    validatedCount < sanitizedFindings.length
+      ? 'Audit incomplete: not all solutions could be executed in GFS.'
       : undefined;
 
   return {
@@ -1336,13 +1277,13 @@ export function buildAuditReport(input: BuildAuditReportInput): AuditReport {
       datasourceId: input.datasourceId ?? 'unknown',
       ...(input.database ? { database: input.database } : {}),
     },
-    summary: createSummary(allFindings, crossLayerSignals),
+    summary: createSummary(sanitizedFindings, crossLayerSignals),
     severitySummary,
     crossLayerSignals,
     auditTasks,
-    findings: allFindings,
-    quickWins: createQuickWins(input, allFindings),
-    nextSteps: createNextSteps(allFindings, input.infraSignals),
+    findings: sanitizedFindings,
+    quickWins: createQuickWins(input, sanitizedFindings, gfsValidations),
+    nextSteps: createNextSteps(sanitizedFindings, gfsValidations),
     gfsValidations,
     incompleteReason,
   };

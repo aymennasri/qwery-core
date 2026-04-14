@@ -125,8 +125,8 @@ describe('buildAuditReport', () => {
     });
 
     expect(report.findings).toHaveLength(0);
-    expect(report.quickWins.length).toBeGreaterThan(0);
-    expect(report.nextSteps.length).toBeGreaterThan(0);
+    expect(report.quickWins).toEqual([]);
+    expect(report.nextSteps).toEqual([]);
   });
 
   it('ignores low-latency metadata plan insights', () => {
@@ -220,7 +220,7 @@ describe('buildAuditReport', () => {
     expect(report.findings[3]?.title).toContain('Unused index');
   });
 
-  it('creates configuration findings only for actual gaps and keeps recommendations structured', () => {
+  it('creates configuration findings only for actual gaps and suppresses synthetic remediation SQL', () => {
     const report = buildAuditReport({
       engine: 'postgresql',
       datasourceId: 'ds_cfg',
@@ -239,9 +239,13 @@ describe('buildAuditReport', () => {
       'low',
     ]);
     expect(report.findings[0]?.title).toContain('pg_stat_statements');
-    expect(report.findings[1]?.sql?.join('\n')).toContain('track_io_timing');
-    expect(report.findings[2]?.sql?.join('\n')).toContain(
-      'log_min_duration_statement',
+    expect(report.findings[1]?.recommendation).toContain(
+      'executed GFS validations',
+    );
+    expect(report.findings[1]?.sql).toBeUndefined();
+    expect(report.findings[2]?.sql).toBeUndefined();
+    expect(report.incompleteReason).toBe(
+      'Audit incomplete: not all solutions could be executed in GFS.',
     );
   });
 
@@ -273,5 +277,52 @@ describe('buildAuditReport', () => {
     expect(cpuTask?.status).toBe('partial');
     expect(configTask?.status).toBe('partial');
     expect(report.findings).toHaveLength(0);
+  });
+
+  it('surfaces only validated GFS actions as quick wins and next steps', () => {
+    const report = buildAuditReport({
+      engine: 'postgresql',
+      datasourceId: 'ds_validated',
+      planInsights: [
+        {
+          query: 'SELECT * FROM orders WHERE customer_id = 42',
+          executionTimeMs: 3250,
+          planningTimeMs: 3.2,
+          seqScanNodes: 1,
+          indexScanNodes: 0,
+          planRows: 100,
+          actualRows: 12000,
+        },
+      ],
+      gfsValidations: [
+        {
+          recommendation: 'ANALYZE public.orders',
+          validationType: 'maintenance',
+          branchName: 'audit-branch',
+          checkpointCommit: 'abc123',
+          afterCommit: 'def456',
+          actionTaken: 'ANALYZE public.orders',
+          beforeTimeMs: 300,
+          afterTimeMs: 200,
+          beforeReadBlocks: 100,
+          afterReadBlocks: 80,
+          beforeHitBlocks: 50,
+          afterHitBlocks: 60,
+          deltaMs: -100,
+          deltaPct: -33.3,
+          recommendationStatus: 'validated',
+          benchmarkSuitability: 'latency-impact',
+          rollback: 'not needed',
+        },
+      ],
+    });
+
+    expect(report.quickWins).toEqual([
+      'Validated in GFS: ANALYZE public.orders',
+    ]);
+    expect(report.nextSteps).toEqual([
+      'Use the validated GFS evidence for analyze public.orders before any rollout decision.',
+    ]);
+    expect(report.incompleteReason).toBeUndefined();
   });
 });

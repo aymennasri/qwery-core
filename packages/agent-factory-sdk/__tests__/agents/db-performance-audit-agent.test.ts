@@ -49,72 +49,38 @@ describe('DbPerformanceAuditAgent', () => {
   });
 
   it('instructs the agent to report measured before and after testing', () => {
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
+    const requiredPhrases = [
       'If no datasource is attached, stop immediately',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
-      'When `validate_remediation_in_gfs_cli` is available',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
-      'before metrics, after metrics, and a delta statement',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
-      'Recommendation Testing Results',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
       'validate every solution in GFS',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
+      'before metrics, after metrics, and a delta statement',
+      'Recommendation Testing Results',
       'default to testing ANALYZE on the most relevant table in GFS',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
       'Prefer reversible experiments before persistent changes',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
-      'SET LOCAL or SET for the current session',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
+      'Place `SET LOCAL`/`SET` and `RESET` statements in `actionStatements`',
       'validationQuery` must stay a read-only representative `SELECT` or `WITH` query',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
-      'place `SET`/`RESET` statements in `actionStatements`',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
       'Never batch multiple `validate_remediation_in_gfs_cli` calls in the same assistant turn',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
-      'provide only remediation alternatives that were executed in GFS',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
       'Use the original datasource only for read-only diagnostics and evidence gathering',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
-      'after commit',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
-      '| Recommendation | GFS Branch | Checkpoint Commit | Action Taken | Before | After | Delta | Rollback | Outcome |',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
+      '| Recommendation | Validation Type | GFS Branch | Checkpoint Commit | Action Taken | Before | After | Delta | Rollback | Outcome |',
       'Audit incomplete: not all solutions could be executed in GFS.',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
       'The Recommendation Testing Results table must contain only executed GFS validations',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
       'validation.assessment as authoritative',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
       'Do not promote a regressed or neutral GFS result into the executive summary, quick wins, or conclusion',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
       'If a validation benchmark is below 5ms total time before the change',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
       'If a tested candidate was rejected or inconclusive, do not include it as a recommendation row',
-    );
-    expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(
       'Only include actions with successful GFS validation and recommendationStatus `validated`',
-    );
+      'Do not include any suggested action anywhere in the final report',
+      'For configuration and observability actions, you must still validate in GFS',
+      'build a validated recommendation registry from successful GFS validations only',
+      'Blocked - no validated GFS remediation for this finding.',
+      'The only actions allowed in Sections 3, 4, 7, 10, 11, and 12 are the actions present in the successful GFS validation set',
+      'Do not append remediation prose under this section unless the remediation was successfully validated in GFS',
+      'If fewer than 3 validated actions exist, list only those actions. Do not fill the section with unvalidated ideas.',
+      'Do not mention any next action in the conclusion unless it appears in the successful GFS validation set.',
+    ];
+
+    for (const phrase of requiredPhrases) {
+      expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(phrase);
+    }
   });
 
   it('registers every required db audit tool for the audit agent', async () => {
