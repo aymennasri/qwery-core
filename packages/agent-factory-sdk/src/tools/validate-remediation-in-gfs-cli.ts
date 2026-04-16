@@ -29,9 +29,11 @@ const GFS_BASELINE_METADATA_FILENAME = 'baseline.json';
 const GFS_BASELINE_LOCK_STALE_MS = 15 * 60 * 1000;
 const GFS_BASELINE_LOCK_WAIT_TIMEOUT_MS = 2 * 60 * 1000;
 const GFS_BASELINE_LOCK_WAIT_STEP_MS = 500;
+const GFS_BASELINE_LOCK_METADATA_FILENAME = 'owner.json';
 const MIN_LATENCY_IMPACT_BENCHMARK_MS = 5;
 const NEUTRAL_DELTA_ABS_MS = 1;
 const NEUTRAL_DELTA_PCT = 10;
+const inProcessValidationQueues = new Map<string, Promise<void>>();
 const POSTGRES_CLIENT_ENV_VARS = {
   psql: 'QWERY_PSQL_BIN',
   pgDump: 'QWERY_PG_DUMP_BIN',
@@ -48,6 +50,11 @@ type CommandOptions = {
 type CommandResult = {
   stdout: string;
   stderr: string;
+};
+
+type DirectoryLockMetadata = {
+  pid: number;
+  createdAt: string;
 };
 
 type ExplainMetrics = {
@@ -744,10 +751,25 @@ async function withDirectoryLock<T>(
   options: DirectoryLockOptions = {},
 ): Promise<T> {
   const startedAt = Date.now();
+  const metadataPath = join(lockDir, GFS_BASELINE_LOCK_METADATA_FILENAME);
 
   while (Date.now() - startedAt < GFS_BASELINE_LOCK_WAIT_TIMEOUT_MS) {
     try {
       await mkdir(lockDir);
+      await writeFile(
+        metadataPath,
+        JSON.stringify(
+          {
+            pid: process.pid,
+            createdAt: new Date().toISOString(),
+          } satisfies DirectoryLockMetadata,
+          null,
+          2,
+        ),
+        'utf8',
+      ).catch(() => {
+        // Best-effort metadata for cross-process orphan detection.
+      });
       try {
         return await fn();
       } finally {
@@ -762,6 +784,23 @@ async function withDirectoryLock<T>(
       }
 
       try {
+        const owner = JSON.parse(
+          await readFile(metadataPath, 'utf8'),
+        ) as Partial<DirectoryLockMetadata>;
+        const ownerPid =
+          typeof owner.pid === 'number' && Number.isInteger(owner.pid)
+            ? owner.pid
+            : null;
+
+        if (ownerPid !== null) {
+          try {
+            process.kill(ownerPid, 0);
+          } catch {
+            await rm(lockDir, { recursive: true, force: true });
+            continue;
+          }
+        }
+
         const lockStat = await stat(lockDir);
         if (Date.now() - lockStat.mtimeMs > GFS_BASELINE_LOCK_STALE_MS) {
           await rm(lockDir, { recursive: true, force: true });
@@ -783,6 +822,43 @@ async function withDirectoryLock<T>(
   }
 
   throw new Error('Timed out waiting for the cached GFS baseline lock.');
+}
+
+async function withInProcessValidationQueue<T>(
+  key: string,
+  logger: Awaited<ReturnType<typeof getLogger>>,
+  metadata: Record<string, unknown>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const previous = inProcessValidationQueues.get(key);
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const chain = (previous ?? Promise.resolve()).catch(() => undefined).then(() => current);
+  inProcessValidationQueues.set(key, chain);
+
+  if (previous) {
+    const waitStartedAt = Date.now();
+    logger.info(metadata, 'Queued GFS remediation validation behind an active in-process run');
+    await previous.catch(() => undefined);
+    logger.info(
+      {
+        ...metadata,
+        queueWaitMs: Date.now() - waitStartedAt,
+      },
+      'Starting queued GFS remediation validation after prior run finished',
+    );
+  }
+
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (inProcessValidationQueues.get(key) === chain) {
+      inProcessValidationQueues.delete(key);
+    }
+  }
 }
 
 function parsePostgresClientMajorVersion(output: string): string {
@@ -865,6 +941,19 @@ async function runCommand(
       },
     );
   });
+}
+
+async function removeDirectoryTree(path: string): Promise<void> {
+  try {
+    await rm(path, { recursive: true, force: true });
+    return;
+  } catch (error) {
+    if (!isPermissionDeniedError(error)) {
+      throw error;
+    }
+  }
+
+  await runCommand('podman', ['unshare', 'rm', '-rf', path], {});
 }
 
 async function tryReadCommandMajorVersion(
@@ -1024,11 +1113,23 @@ async function waitForPostgresReady(
   program: string,
   connectionUrl: string,
   signal: AbortSignal,
+  logger?: Awaited<ReturnType<typeof getLogger>>,
 ): Promise<void> {
   const startedAt = Date.now();
   let lastError: Error | null = null;
+  let attempts = 0;
+
+  logger?.info(
+    {
+      host: new URL(connectionUrl).hostname,
+      port: new URL(connectionUrl).port || '5432',
+      timeoutMs: POSTGRES_READY_TIMEOUT_MS,
+    },
+    'Starting GFS PostgreSQL readiness polling',
+  );
 
   while (Date.now() - startedAt < POSTGRES_READY_TIMEOUT_MS) {
+    attempts += 1;
     try {
       await runPsql(
         program,
@@ -1037,17 +1138,50 @@ async function waitForPostgresReady(
         signal,
         POSTGRES_READY_CHECK_TIMEOUT_MS,
       );
+      logger?.info(
+        {
+          attempts,
+          elapsedMs: Date.now() - startedAt,
+        },
+        'GFS PostgreSQL readiness polling succeeded',
+      );
       return;
     } catch (error) {
       if (!isRetryablePostgresStartupError(error)) {
+        logger?.warn(
+          {
+            attempts,
+            elapsedMs: Date.now() - startedAt,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'GFS PostgreSQL readiness polling failed with non-retryable error',
+        );
         throw error;
       }
 
       lastError =
         error instanceof Error ? error : new Error(String(error ?? 'unknown'));
+      logger?.warn(
+        {
+          attempts,
+          elapsedMs: Date.now() - startedAt,
+          error: lastError.message,
+        },
+        'GFS PostgreSQL readiness polling attempt failed; retrying',
+      );
       await waitForAbortableDelay(POSTGRES_READY_RETRY_DELAY_MS, signal);
     }
   }
+
+  logger?.warn(
+    {
+      attempts,
+      elapsedMs: Date.now() - startedAt,
+      error: lastError?.message ?? 'unknown error',
+      timeoutMs: POSTGRES_READY_TIMEOUT_MS,
+    },
+    'GFS PostgreSQL readiness polling timed out',
+  );
 
   throw new Error(
     `Timed out waiting for the GFS PostgreSQL instance to accept connections after ${POSTGRES_READY_TIMEOUT_MS}ms. Last error: ${lastError?.message ?? 'unknown error'}`,
@@ -1058,28 +1192,81 @@ async function runGfsImportWithRetry(
   repoPath: string,
   dumpPath: string,
   signal: AbortSignal,
+  logger?: Awaited<ReturnType<typeof getLogger>>,
 ): Promise<void> {
   const startedAt = Date.now();
   let lastError: Error | null = null;
+  let attempts = 0;
+
+  logger?.info(
+    {
+      repoPath,
+      dumpPath,
+      timeoutMs: POSTGRES_READY_TIMEOUT_MS,
+    },
+    'Starting GFS baseline import',
+  );
 
   while (Date.now() - startedAt < POSTGRES_READY_TIMEOUT_MS) {
+    attempts += 1;
     try {
       await runCommand(
         'gfs',
         ['import', '--file', dumpPath, '--format', 'sql'],
         { cwd: repoPath, signal },
       );
+      logger?.info(
+        {
+          repoPath,
+          dumpPath,
+          attempts,
+          elapsedMs: Date.now() - startedAt,
+        },
+        'GFS baseline import succeeded',
+      );
       return;
     } catch (error) {
       if (!isRetryablePostgresStartupError(error)) {
+        logger?.warn(
+          {
+            repoPath,
+            dumpPath,
+            attempts,
+            elapsedMs: Date.now() - startedAt,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'GFS baseline import failed with non-retryable error',
+        );
         throw error;
       }
 
       lastError =
         error instanceof Error ? error : new Error(String(error ?? 'unknown'));
+      logger?.warn(
+        {
+          repoPath,
+          dumpPath,
+          attempts,
+          elapsedMs: Date.now() - startedAt,
+          error: lastError.message,
+        },
+        'GFS baseline import attempt failed; retrying',
+      );
       await waitForAbortableDelay(POSTGRES_READY_RETRY_DELAY_MS, signal);
     }
   }
+
+  logger?.warn(
+    {
+      repoPath,
+      dumpPath,
+      attempts,
+      elapsedMs: Date.now() - startedAt,
+      error: lastError?.message ?? 'unknown error',
+      timeoutMs: POSTGRES_READY_TIMEOUT_MS,
+    },
+    'GFS baseline import timed out',
+  );
 
   throw new Error(
     `Timed out importing the baseline dump into the GFS PostgreSQL instance after ${POSTGRES_READY_TIMEOUT_MS}ms. Last error: ${lastError?.message ?? 'unknown error'}`,
@@ -1237,7 +1424,7 @@ async function prepareFreshCacheLocation(input: {
   logger: Awaited<ReturnType<typeof getLogger>>;
 }): Promise<{ cacheDir: string; repoPath: string; metadataPath: string }> {
   try {
-    await rm(input.cacheDir, { recursive: true, force: true });
+    await removeDirectoryTree(input.cacheDir);
     return {
       cacheDir: input.cacheDir,
       repoPath: join(input.cacheDir, 'repo'),
@@ -1311,6 +1498,7 @@ async function ensureGfsBaselineRepo(input: {
     freshLocation.cacheDir,
     `baseline-${randomUUID().slice(0, 8)}.sql`,
   );
+  let shouldStopCompute = false;
 
   await runCommand(
     postgresClients.pgDump,
@@ -1334,21 +1522,66 @@ async function ensureGfsBaselineRepo(input: {
       { cwd: freshLocation.repoPath, signal: input.signal },
     );
 
-    await runCommand('gfs', ['compute', 'start'], {
-      cwd: freshLocation.repoPath,
-      signal: input.signal,
-    });
+    input.logger.info(
+      {
+        repoPath: freshLocation.repoPath,
+      },
+      'Starting GFS compute for cached baseline repo',
+    );
+    try {
+      await runCommand('gfs', ['compute', 'start'], {
+        cwd: freshLocation.repoPath,
+        signal: input.signal,
+      });
+      shouldStopCompute = true;
+    } catch (error) {
+      input.logger.warn(
+        {
+          repoPath: freshLocation.repoPath,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'GFS compute start failed for cached baseline repo',
+      );
+      throw error;
+    }
+    input.logger.info(
+      {
+        repoPath: freshLocation.repoPath,
+      },
+      'GFS compute started for cached baseline repo',
+    );
 
     const importStatus = await readGfsConnectionUrl(
       freshLocation.repoPath,
       input.signal,
     );
+    input.logger.info(
+      {
+        repoPath: freshLocation.repoPath,
+        host: new URL(importStatus.connectionUrl).hostname,
+        port: new URL(importStatus.connectionUrl).port || '5432',
+      },
+      'Read GFS PostgreSQL connection details for cached baseline repo',
+    );
     await waitForPostgresReady(
       postgresClients.psql,
       importStatus.connectionUrl,
       input.signal,
+      input.logger,
     );
-    await runGfsImportWithRetry(freshLocation.repoPath, dumpPath, input.signal);
+    input.logger.info(
+      {
+        repoPath: freshLocation.repoPath,
+        dumpPath,
+      },
+      'Beginning baseline dump import into GFS cached repo',
+    );
+    await runGfsImportWithRetry(
+      freshLocation.repoPath,
+      dumpPath,
+      input.signal,
+      input.logger,
+    );
     await runCommand(
       'gfs',
       ['commit', '-m', 'baseline snapshot before audit remediation'],
@@ -1381,6 +1614,23 @@ async function ensureGfsBaselineRepo(input: {
       computeRunning: true,
     };
   } catch (error) {
+    if (shouldStopCompute) {
+      await runCommand('gfs', ['compute', 'stop'], {
+        cwd: freshLocation.repoPath,
+        timeoutMs: COMPUTE_STOP_TIMEOUT_MS,
+      }).catch((stopError) => {
+        input.logger.warn(
+          {
+            repoPath: freshLocation.repoPath,
+            error:
+              stopError instanceof Error
+                ? stopError.message
+                : String(stopError),
+          },
+          'Failed to stop GFS compute after baseline creation failure',
+        );
+      });
+    }
     input.logger.warn(
       {
         repoPath: freshLocation.repoPath,
@@ -1388,11 +1638,9 @@ async function ensureGfsBaselineRepo(input: {
       },
       'Failed to create cached GFS baseline repo; removing partial cache',
     );
-    await rm(freshLocation.cacheDir, { recursive: true, force: true }).catch(
-      () => {
-        // Best-effort cleanup of partial cache state.
-      },
-    );
+    await removeDirectoryTree(freshLocation.cacheDir).catch(() => {
+      // Best-effort cleanup of partial cache state.
+    });
     throw error;
   } finally {
     await unlink(dumpPath).catch(() => {
@@ -1586,10 +1834,21 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
       const concurrentValidationMessage =
         'Another GFS remediation validation is already running for this datasource in this conversation. Run validate_remediation_in_gfs_cli one recommendation at a time.';
 
-      return withDirectoryLock(
-        lockDir,
-        ctx.abort,
-        async () => {
+      return withInProcessValidationQueue(
+        cacheKey,
+        logger,
+        {
+          conversationId: ctx.conversationId,
+          datasourceId: datasource.id,
+          branchName,
+          cacheKey,
+          repoPath,
+        },
+        () =>
+          withDirectoryLock(
+            lockDir,
+            ctx.abort,
+            async () => {
           let shouldStopCompute = false;
           let activeRepoPath = repoPath;
 
@@ -1794,11 +2053,12 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
               });
             }
           }
-        },
-        {
-          waitOnBusy: false,
-          busyMessage: concurrentValidationMessage,
-        },
+            },
+            {
+              waitOnBusy: false,
+              busyMessage: concurrentValidationMessage,
+            },
+          ),
       );
     },
   },
