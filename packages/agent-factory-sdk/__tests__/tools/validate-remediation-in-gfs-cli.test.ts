@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -56,6 +56,37 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
         'commit fe7c2f7 (HEAD -> main, main)\nAuthor: test <test@example.com>',
       ),
     ).toBe('fe7c2f7');
+  });
+
+  it('parses full commit hashes from gfs JSON log output', () => {
+    expect(
+      __testables.parseLatestCommitHashFromGfsLogJson(
+        JSON.stringify({
+          commits: [
+            {
+              hash: 'fe7c2f7',
+              hash_full:
+                'fe7c2f7c91cf184bf8f9f9085b26d7f4af2c2cc0b8de6c4be7db69ea11223344',
+            },
+          ],
+        }),
+      ),
+    ).toBe(
+      'fe7c2f7c91cf184bf8f9f9085b26d7f4af2c2cc0b8de6c4be7db69ea11223344',
+    );
+  });
+
+  it('detects branch-already-exists errors from the gfs CLI', () => {
+    expect(
+      __testables.isExistingBranchError(
+        new Error("gfs command failed: branch 'audit-branch' already exists"),
+      ),
+    ).toBe(true);
+    expect(
+      __testables.isExistingBranchError(
+        new Error('gfs command failed: failed to connect to Docker daemon'),
+      ),
+    ).toBe(false);
   });
 
   it('builds version-aware binary candidates before generic fallbacks', () => {
@@ -264,6 +295,80 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it('detects expired cached baselines by metadata age', () => {
+    const nowMs = Date.parse('2026-04-17T00:00:00.000Z');
+
+    expect(
+      __testables.shouldDeleteExpiredBaselineCache({
+        metadata: {
+          checkpointCommit: 'abc1234',
+          postgresMajorVersion: '16',
+          createdAt: '2026-04-08T00:00:00.000Z',
+        },
+        cacheMtimeMs: nowMs,
+        nowMs,
+      }),
+    ).toBe(true);
+
+    expect(
+      __testables.shouldDeleteExpiredBaselineCache({
+        metadata: {
+          checkpointCommit: 'abc1234',
+          postgresMajorVersion: '16',
+          createdAt: '2026-04-15T00:00:00.000Z',
+        },
+        cacheMtimeMs: nowMs,
+        nowMs,
+      }),
+    ).toBe(false);
+  });
+
+  it('cleans expired unlocked baseline caches only', async () => {
+    const baselineRoot = await mkdtemp(join(tmpdir(), 'gfs-baselines-'));
+    const oldCache = join(baselineRoot, 'old-cache');
+    const lockedCache = join(baselineRoot, 'locked-cache');
+    const activeCache = join(baselineRoot, 'active-cache');
+    const recentCache = join(baselineRoot, 'recent-cache');
+    const oldLockDir = join(baselineRoot, 'locked-cache.lock');
+    const nowMs = Date.parse('2026-04-17T00:00:00.000Z');
+
+    const writeMetadata = async (cacheDir: string, createdAt: string) => {
+      await mkdir(cacheDir, { recursive: true });
+      await writeFile(
+        join(cacheDir, 'baseline.json'),
+        JSON.stringify(
+          {
+            checkpointCommit: 'abc1234',
+            postgresMajorVersion: '16',
+            createdAt,
+          },
+          null,
+          2,
+        ),
+        'utf8',
+      );
+    };
+
+    await writeMetadata(oldCache, '2026-04-01T00:00:00.000Z');
+    await writeMetadata(lockedCache, '2026-04-01T00:00:00.000Z');
+    await writeMetadata(activeCache, '2026-04-01T00:00:00.000Z');
+    await writeMetadata(recentCache, '2026-04-16T00:00:00.000Z');
+    await mkdir(oldLockDir, { recursive: true });
+
+    await __testables.cleanupExpiredBaselineCaches({
+      baselineRoot,
+      activeCacheKey: 'active-cache',
+      nowMs,
+    });
+
+    await expect(stat(oldCache)).rejects.toThrow();
+    await expect(stat(lockedCache)).resolves.toBeTruthy();
+    await expect(stat(activeCache)).resolves.toBeTruthy();
+    await expect(stat(recentCache)).resolves.toBeTruthy();
+
+    await rm(baselineRoot, { recursive: true, force: true });
+  });
+
   it('parses root plan details from EXPLAIN JSON output', () => {
     expect(
       __testables.parseExplainPlanSummary(
@@ -324,7 +429,9 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
       ),
     };
 
-    expect(__testables.assessValidationResult(before, after)).toMatchObject({
+    expect(
+      __testables.assessValidationResult(before, after, 'latency', []),
+    ).toMatchObject({
       timingOutcome: 'regressed',
       recommendationStatus: 'rejected',
       benchmarkSuitability: 'latency-impact',
@@ -365,7 +472,9 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
       ),
     };
 
-    expect(__testables.assessValidationResult(before, after)).toMatchObject({
+    expect(
+      __testables.assessValidationResult(before, after, 'latency', []),
+    ).toMatchObject({
       timingOutcome: 'improved',
       recommendationStatus: 'validated',
       benchmarkSuitability: 'low-latency',

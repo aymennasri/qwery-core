@@ -1,6 +1,14 @@
 import { execFile, type ExecFileException } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -26,6 +34,7 @@ const GFS_AUDIT_ROOT_ENV_VAR = 'QWERY_GFS_AUDITS_DIR';
 const GFS_AUDIT_ROOT_SUBDIR = 'qwery/gfs-audits';
 const GFS_BASELINE_CACHE_SUBDIR = 'baselines';
 const GFS_BASELINE_METADATA_FILENAME = 'baseline.json';
+const GFS_BASELINE_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const GFS_BASELINE_LOCK_STALE_MS = 15 * 60 * 1000;
 const GFS_BASELINE_LOCK_WAIT_TIMEOUT_MS = 2 * 60 * 1000;
 const GFS_BASELINE_LOCK_WAIT_STEP_MS = 500;
@@ -90,6 +99,13 @@ type GfsStatusResponse = {
   compute?: {
     connection_string: string;
   } | null;
+};
+
+type GfsLogResponse = {
+  commits?: Array<{
+    hash?: string;
+    hash_full?: string;
+  }>;
 };
 
 type ResolvedPostgresClientBinaries = {
@@ -642,6 +658,26 @@ function isFullCommitHash(value: string): boolean {
   return /^[0-9a-f]{64}$/i.test(value.trim());
 }
 
+function parseLatestCommitHashFromGfsLogJson(raw: string): string {
+  const parsed = JSON.parse(raw) as GfsLogResponse;
+  const latestCommit = parsed.commits?.[0];
+  if (!latestCommit) {
+    throw new Error('GFS log did not return any commits.');
+  }
+
+  const fullHash = latestCommit.hash_full?.trim();
+  if (fullHash && isFullCommitHash(fullHash)) {
+    return fullHash;
+  }
+
+  const hash = latestCommit.hash?.trim();
+  if (hash && /^[0-9a-f]{7,64}$/i.test(hash)) {
+    return hash;
+  }
+
+  throw new Error('Unable to parse the latest GFS commit hash from JSON log output.');
+}
+
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values.filter((value) => value.trim() !== '')));
 }
@@ -665,6 +701,13 @@ function isRetryablePostgresStartupError(error: unknown): boolean {
     message.includes('connection to server was lost') ||
     message.includes('terminating connection due to administrator command') ||
     message.includes('the database server shut down unexpectedly')
+  );
+}
+
+function isExistingBranchError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /branch\s+['`"]?.+['`"]?\s+already exists/i.test(error.message)
   );
 }
 
@@ -1355,6 +1398,89 @@ async function readBaselineMetadata(
   }
 }
 
+function shouldDeleteExpiredBaselineCache(input: {
+  metadata: GfsBaselineMetadata | null;
+  cacheMtimeMs: number;
+  nowMs: number;
+}): boolean {
+  const metadataCreatedAtMs = input.metadata?.createdAt
+    ? Date.parse(input.metadata.createdAt)
+    : Number.NaN;
+  const lastTouchedMs = Number.isFinite(metadataCreatedAtMs)
+    ? metadataCreatedAtMs
+    : input.cacheMtimeMs;
+
+  return input.nowMs - lastTouchedMs > GFS_BASELINE_CACHE_MAX_AGE_MS;
+}
+
+async function cleanupExpiredBaselineCaches(input: {
+  baselineRoot: string;
+  activeCacheKey: string;
+  logger?: Awaited<ReturnType<typeof getLogger>>;
+  nowMs?: number;
+}): Promise<void> {
+  const nowMs = input.nowMs ?? Date.now();
+
+  try {
+    const entries = await readdir(input.baselineRoot, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      if (entry.name.endsWith('.lock') || entry.name === input.activeCacheKey) {
+        continue;
+      }
+
+      const cacheDir = join(input.baselineRoot, entry.name);
+      const lockDir = join(input.baselineRoot, `${entry.name}.lock`);
+      if (await pathExists(lockDir)) {
+        continue;
+      }
+
+      const cacheStat = await stat(cacheDir).catch(() => null);
+      if (!cacheStat) {
+        continue;
+      }
+
+      const metadata = await readBaselineMetadata(
+        join(cacheDir, GFS_BASELINE_METADATA_FILENAME),
+      );
+
+      if (
+        !shouldDeleteExpiredBaselineCache({
+          metadata,
+          cacheMtimeMs: cacheStat.mtimeMs,
+          nowMs,
+        })
+      ) {
+        continue;
+      }
+
+      await removeDirectoryTree(cacheDir);
+      input.logger?.info(
+        {
+          cacheDir,
+          ageDays: Number(
+            (((nowMs - cacheStat.mtimeMs) / (24 * 60 * 60 * 1000)).toFixed(2)),
+          ),
+          maxAgeDays: GFS_BASELINE_CACHE_MAX_AGE_MS / (24 * 60 * 60 * 1000),
+        },
+        'Removed expired cached GFS baseline repo',
+      );
+    }
+  } catch (error) {
+    input.logger?.warn(
+      {
+        baselineRoot: input.baselineRoot,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      'Failed to clean up expired cached GFS baseline repos',
+    );
+  }
+}
+
 async function tryRecoverBaselineRepo(input: {
   cacheDir: string;
   repoPath: string;
@@ -1649,19 +1775,49 @@ async function ensureGfsBaselineRepo(input: {
   }
 }
 
-async function resolveAvailableBranchName(
-  repoPath: string,
-  requestedBranchName: string,
-): Promise<string> {
-  const refPath = join(repoPath, '.gfs', 'refs', 'heads', requestedBranchName);
-  if (!(await pathExists(refPath))) {
-    return requestedBranchName;
-  }
+async function checkoutAuditBranch(input: {
+  repoPath: string;
+  requestedBranchName: string;
+  startRevision: string;
+  signal: AbortSignal;
+}): Promise<{ branchName: string; adjusted: boolean }> {
+  try {
+    await runCommand(
+      'gfs',
+      ['checkout', '-b', input.requestedBranchName, input.startRevision],
+      {
+        cwd: input.repoPath,
+        signal: input.signal,
+      },
+    );
+    return {
+      branchName: input.requestedBranchName,
+      adjusted: false,
+    };
+  } catch (error) {
+    if (!isExistingBranchError(error)) {
+      throw error;
+    }
 
-  return buildBranchNameWithSuffix(
-    requestedBranchName,
-    randomUUID().slice(0, 8),
-  );
+    const fallbackBranchName = buildBranchNameWithSuffix(
+      input.requestedBranchName,
+      randomUUID().slice(0, 8),
+    );
+
+    await runCommand(
+      'gfs',
+      ['checkout', '-b', fallbackBranchName, input.startRevision],
+      {
+        cwd: input.repoPath,
+        signal: input.signal,
+      },
+    );
+
+    return {
+      branchName: fallbackBranchName,
+      adjusted: true,
+    };
+  }
 }
 
 export const __testables = {
@@ -1671,14 +1827,18 @@ export const __testables = {
   buildBootstrapBinaryCandidates,
   buildSessionScopedExplainSql,
   buildVersionedBinaryCandidates,
+  cleanupExpiredBaselineCaches,
   extractExplainJsonPayload,
+  isExistingBranchError,
   isRetryablePostgresStartupError,
   partitionActionStatements,
   parseExplainPlanSummary,
   parseCommitHash,
   parseExplainMetrics,
+  parseLatestCommitHashFromGfsLogJson,
   parsePostgresClientMajorVersion,
   resolveGfsAuditWorkingRoot,
+  shouldDeleteExpiredBaselineCache,
   withDirectoryLock,
 };
 
@@ -1697,26 +1857,11 @@ async function readLatestCommitHash(
   repoPath: string,
   signal: AbortSignal,
 ): Promise<string> {
-  const status = await readGfsStatus(repoPath, signal);
-  const branchName = status.current_branch?.trim();
-
-  if (branchName) {
-    try {
-      const refPath = join(repoPath, '.gfs', 'refs', 'heads', branchName);
-      const refValue = (await readFile(refPath, 'utf8')).trim();
-      if (isFullCommitHash(refValue)) {
-        return refValue;
-      }
-    } catch {
-      // Fall back to parsing `gfs log` output.
-    }
-  }
-
-  const result = await runCommand('gfs', ['log', '--max-count', '1'], {
+  const result = await runCommand('gfs', ['--json', 'log', '--max-count', '1'], {
     cwd: repoPath,
     signal,
   });
-  return parseCommitHash(result.stdout);
+  return parseLatestCommitHashFromGfsLogJson(result.stdout);
 }
 
 async function readGfsConnectionUrl(
@@ -1814,6 +1959,11 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
         datasourceId: datasource.id,
         connectionUrl,
       });
+      await cleanupExpiredBaselineCaches({
+        baselineRoot,
+        activeCacheKey: cacheKey,
+        logger,
+      });
       const cacheDir = join(baselineRoot, cacheKey);
       const repoPath = join(cacheDir, 'repo');
       const metadataPath = join(cacheDir, GFS_BASELINE_METADATA_FILENAME);
@@ -1881,11 +2031,14 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
               },
             });
 
-            const effectiveBranchName = await resolveAvailableBranchName(
-              activeRepoPath,
-              branchName,
-            );
-            if (effectiveBranchName !== branchName) {
+            const checkoutResult = await checkoutAuditBranch({
+              repoPath: activeRepoPath,
+              requestedBranchName: branchName,
+              startRevision: baseline.checkpointCommit,
+              signal: ctx.abort,
+            });
+            const effectiveBranchName = checkoutResult.branchName;
+            if (checkoutResult.adjusted) {
               await ctx.metadata({
                 title: 'Adjusted GFS branch name',
                 metadata: {
@@ -1894,20 +2047,6 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
                 },
               });
             }
-
-            await runCommand(
-              'gfs',
-              [
-                'checkout',
-                '-b',
-                effectiveBranchName,
-                baseline.checkpointCommit,
-              ],
-              {
-                cwd: activeRepoPath,
-                signal: ctx.abort,
-              },
-            );
 
             if (!baseline.computeRunning) {
               await runCommand('gfs', ['compute', 'start'], {

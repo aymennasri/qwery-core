@@ -38,20 +38,16 @@ describe('DbPerformanceAuditAgent', () => {
     expect(tools?.runQueries).toBe(true);
   });
 
-  it('keeps enough step budget and todo tooling for multi-phase audits', () => {
-    const tools = DbPerformanceAuditAgent.options?.tools as
-      | Record<string, boolean>
-      | undefined;
-
+  it('keeps enough step budget for multi-phase audits without todo tools', () => {
     expect(DbPerformanceAuditAgent.steps).toBeGreaterThanOrEqual(60);
-    expect(tools?.todowrite).toBe(true);
-    expect(tools?.todoread).toBe(true);
+    expect(DB_PERFORMANCE_AUDIT_PROMPT).not.toContain('keep task progress visible with todo tools');
+    expect(DB_PERFORMANCE_AUDIT_PROMPT).not.toContain('track with todo tools');
   });
 
   it('instructs the agent to report measured before and after testing', () => {
     const requiredPhrases = [
       'If no datasource is attached, stop immediately',
-      'validate every solution in GFS',
+      'validate performance-affecting solutions in GFS',
       'before metrics, after metrics, and a delta statement',
       'Recommendation Testing Results',
       'default to testing ANALYZE on the most relevant table in GFS',
@@ -67,15 +63,16 @@ describe('DbPerformanceAuditAgent', () => {
       'Do not promote a regressed or neutral GFS result into the executive summary, quick wins, or conclusion',
       'If a validation benchmark is below 5ms total time before the change',
       'If a tested candidate was rejected or inconclusive, do not include it as a recommendation row',
-      'Only include actions with successful GFS validation and recommendationStatus `validated`',
-      'Do not include any suggested action anywhere in the final report',
-      'For configuration and observability actions, you must still validate in GFS',
-      'build a validated recommendation registry from successful GFS validations only',
+      'Only include performance-affecting actions with successful GFS validation and recommendationStatus `validated`',
+      'Do not include any performance-affecting suggested action anywhere in the final report',
+      'For performance-affecting configuration actions, you must still validate in GFS',
+      'For observability-only changes, do not force a GFS validation',
+      'build a validated recommendation registry from successful GFS validations for performance-affecting actions',
       'Blocked - no validated GFS remediation for this finding.',
-      'The only actions allowed in Sections 3, 4, 7, 10, 11, and 12 are the actions present in the successful GFS validation set',
-      'Do not append remediation prose under this section unless the remediation was successfully validated in GFS',
-      'If fewer than 3 validated actions exist, list only those actions. Do not fill the section with unvalidated ideas.',
-      'Do not mention any next action in the conclusion unless it appears in the successful GFS validation set.',
+      'The only performance-affecting actions allowed in Sections 3, 4, 7, 10, 11, and 12 are the actions present in the successful GFS validation set',
+      'Observability-only actions may be mentioned as recommendations when they are supported directly by collected evidence',
+      'If fewer than 3 validated performance-affecting actions exist, list only those plus any direct evidence-backed observability quick wins.',
+      'Do not mention any performance-affecting next action in the conclusion unless it appears in the successful GFS validation set.',
     ];
 
     for (const phrase of requiredPhrases) {
@@ -106,8 +103,6 @@ describe('DbPerformanceAuditAgent', () => {
         'validate_remediation_in_gfs_cli',
         'runQuery',
         'runQueries',
-        'todowrite',
-        'todoread',
       ]),
     );
   });

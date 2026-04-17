@@ -233,6 +233,11 @@ describe('buildAuditReport', () => {
     });
 
     expect(report.findings).toHaveLength(3);
+    expect(report.findings.map((finding) => finding.category)).toEqual([
+      'observability',
+      'observability',
+      'observability',
+    ]);
     expect(report.findings.map((finding) => finding.severity)).toEqual([
       'high',
       'medium',
@@ -244,9 +249,7 @@ describe('buildAuditReport', () => {
     );
     expect(report.findings[1]?.sql).toBeUndefined();
     expect(report.findings[2]?.sql).toBeUndefined();
-    expect(report.incompleteReason).toBe(
-      'Audit incomplete: not all solutions could be executed in GFS.',
-    );
+    expect(report.incompleteReason).toBeUndefined();
   });
 
   it('keeps missing operational data as not-collected or partial task coverage', () => {

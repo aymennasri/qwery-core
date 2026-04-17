@@ -10,6 +10,7 @@ export type AuditFinding = {
     | 'table-stats'
     | 'locks-waits'
     | 'configuration'
+    | 'observability'
     | 'capacity';
   evidence: string[];
   impact: string;
@@ -845,7 +846,7 @@ function createConfigGapFindings(config: ConfigGapInput): AuditFinding[] {
       title:
         'track_io_timing is off — storage latency invisible to diagnostics',
       severity: 'medium',
-      category: 'configuration',
+      category: 'observability',
       evidence: [
         'track_io_timing=off means blk_read_time and blk_write_time in pg_stat_database and pg_stat_statements are always 0.',
         'Without IO timing, the agent cannot distinguish between CPU-bound and IO-bound slow queries.',
@@ -873,7 +874,7 @@ function createConfigGapFindings(config: ConfigGapInput): AuditFinding[] {
       id: `config_gap_${++idx}`,
       title: 'pg_stat_statements not enabled — workload profiling unavailable',
       severity: 'high',
-      category: 'configuration',
+      category: 'observability',
       evidence: [
         'pg_stat_statements extension is not loaded. Slow query candidates were sourced from pg_stat_activity (point-in-time snapshot only).',
         'Without pg_stat_statements, cumulative per-query statistics (total time, call count, stddev) are unavailable.',
@@ -910,7 +911,7 @@ function createConfigGapFindings(config: ConfigGapInput): AuditFinding[] {
       title:
         'log_min_duration_statement is disabled — slow queries not captured in logs',
       severity: 'low',
-      category: 'configuration',
+      category: 'observability',
       evidence: [
         'log_min_duration_statement=-1 (disabled). Slow queries will not appear in PostgreSQL logs.',
         'Without this setting, log-based slow query analysis is impossible and incidents cannot be reconstructed after the fact.',
@@ -984,6 +985,10 @@ function sanitizeFindingRecommendations(
       'Remediation details are reported only through executed GFS validations.',
     sql: undefined,
   }));
+}
+
+function requiresGfsValidation(finding: AuditFinding): boolean {
+  return finding.category !== 'observability';
 }
 
 function createAuditTasks(input: BuildAuditReportInput): AuditTask[] {
@@ -1263,10 +1268,13 @@ export function buildAuditReport(input: BuildAuditReportInput): AuditReport {
   const inconclusiveCount = gfsValidations.filter(
     (v) => v.recommendationStatus === 'inconclusive',
   ).length;
+  const requiredValidationCount = sanitizedFindings.filter(
+    requiresGfsValidation,
+  ).length;
   const incompleteReason =
     rejectedCount > 0 ||
     inconclusiveCount > 0 ||
-    validatedCount < sanitizedFindings.length
+    validatedCount < requiredValidationCount
       ? 'Audit incomplete: not all solutions could be executed in GFS.'
       : undefined;
 
