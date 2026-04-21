@@ -1,12 +1,15 @@
 import { execFile, type ExecFileException } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  cp,
   mkdir,
   readFile,
   readdir,
+  rename,
   rm,
   stat,
   unlink,
+  utimes,
   writeFile,
 } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -25,6 +28,7 @@ const DESCRIPTION = `Clone the attached PostgreSQL datasource into a temporary G
 
 const MAX_ACTIONS = 10;
 const COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
+const PG_DUMP_TIMEOUT_MS = 30 * 60 * 1000;
 const VERSION_CHECK_TIMEOUT_MS = 30 * 1000;
 const COMPUTE_STOP_TIMEOUT_MS = 30 * 1000;
 const POSTGRES_READY_TIMEOUT_MS = 60 * 1000;
@@ -33,7 +37,9 @@ const POSTGRES_READY_CHECK_TIMEOUT_MS = 5000;
 const GFS_AUDIT_ROOT_ENV_VAR = 'QWERY_GFS_AUDITS_DIR';
 const GFS_AUDIT_ROOT_SUBDIR = 'qwery/gfs-audits';
 const GFS_BASELINE_CACHE_SUBDIR = 'baselines';
+const GFS_VALIDATION_RUNS_SUBDIR = 'runs';
 const GFS_BASELINE_METADATA_FILENAME = 'baseline.json';
+const GFS_BASELINE_BUILD_SUFFIX = '.building';
 const GFS_BASELINE_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const GFS_BASELINE_LOCK_STALE_MS = 15 * 60 * 1000;
 const GFS_BASELINE_LOCK_WAIT_TIMEOUT_MS = 2 * 60 * 1000;
@@ -115,9 +121,12 @@ type ResolvedPostgresClientBinaries = {
 };
 
 type GfsBaselineMetadata = {
+  state: 'building' | 'ready' | 'failed';
   checkpointCommit: string;
   postgresMajorVersion: string;
   createdAt: string;
+  updatedAt: string;
+  error?: string;
 };
 
 type EnsuredGfsBaseline = {
@@ -131,6 +140,11 @@ type EnsuredGfsBaseline = {
   computeRunning: boolean;
 };
 
+type IsolatedValidationRepo = {
+  workingDir: string;
+  repoPath: string;
+};
+
 type PartitionedActionStatements = {
   persistentStatements: string[];
   sessionSetupStatements: string[];
@@ -141,6 +155,23 @@ type DirectoryLockOptions = {
   waitOnBusy?: boolean;
   busyMessage?: string;
 };
+
+type StageLoggerInput = {
+  logger: Awaited<ReturnType<typeof getLogger>>;
+  stage: string;
+  message: string;
+  metadata?: Record<string, unknown>;
+};
+
+function logValidationStage(input: StageLoggerInput): void {
+  input.logger.info(
+    {
+      stage: input.stage,
+      ...(input.metadata ?? {}),
+    },
+    input.message,
+  );
+}
 
 function sanitizeBranchName(value: string): string {
   const sanitized = value
@@ -684,7 +715,12 @@ function uniqueStrings(values: string[]): string[] {
 
 function isPermissionDeniedError(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException | undefined)?.code;
-  return code === 'EACCES' || code === 'EPERM';
+  return (
+    code === 'EACCES' ||
+    code === 'EPERM' ||
+    code === 'EROFS' ||
+    code === 'EBUSY'
+  );
 }
 
 function isRetryablePostgresStartupError(error: unknown): boolean {
@@ -762,13 +798,42 @@ function hashText(value: string): string {
 }
 
 function buildBaselineCacheKey(input: {
-  conversationId: string;
   datasourceId: string;
   connectionUrl: string;
 }): string {
-  return `${input.datasourceId}-${hashText(
-    `${input.conversationId}:${input.connectionUrl}`,
-  )}`;
+  return `${input.datasourceId}-${hashText(input.connectionUrl)}`;
+}
+
+function buildBaselineStagingCacheDir(cacheDir: string): string {
+  return `${cacheDir}${GFS_BASELINE_BUILD_SUFFIX}-${randomUUID().slice(0, 8)}`;
+}
+
+function createBaselineMetadata(input: {
+  state: GfsBaselineMetadata['state'];
+  checkpointCommit?: string;
+  postgresMajorVersion?: string;
+  createdAt?: string;
+  error?: string;
+}): GfsBaselineMetadata {
+  const now = new Date().toISOString();
+  return {
+    state: input.state,
+    checkpointCommit: input.checkpointCommit ?? '',
+    postgresMajorVersion: input.postgresMajorVersion ?? '',
+    createdAt: input.createdAt ?? now,
+    updatedAt: now,
+    ...(input.error ? { error: input.error } : {}),
+  };
+}
+
+function isReadyBaselineMetadata(
+  metadata: GfsBaselineMetadata | null,
+): metadata is GfsBaselineMetadata {
+  return (
+    metadata?.state === 'ready' &&
+    metadata.checkpointCommit.trim().length > 0 &&
+    metadata.postgresMajorVersion.trim().length > 0
+  );
 }
 
 function buildBranchNameWithSuffix(branchName: string, suffix: string): string {
@@ -813,9 +878,26 @@ async function withDirectoryLock<T>(
       ).catch(() => {
         // Best-effort metadata for cross-process orphan detection.
       });
+      const heartbeat = setInterval(() => {
+        const now = new Date();
+        void writeFile(
+          metadataPath,
+          JSON.stringify(
+            {
+              pid: process.pid,
+              createdAt: now.toISOString(),
+            } satisfies DirectoryLockMetadata,
+            null,
+            2,
+          ),
+          'utf8',
+        ).catch(() => undefined);
+        void utimes(lockDir, now, now).catch(() => undefined);
+      }, Math.max(1000, Math.floor(GFS_BASELINE_LOCK_STALE_MS / 3)));
       try {
         return await fn();
       } finally {
+        clearInterval(heartbeat);
         await rm(lockDir, { recursive: true, force: true }).catch(() => {
           // Best-effort lock cleanup.
         });
@@ -844,7 +926,7 @@ async function withDirectoryLock<T>(
           }
         }
 
-        const lockStat = await stat(lockDir);
+        const lockStat = await stat(metadataPath).catch(() => stat(lockDir));
         if (Date.now() - lockStat.mtimeMs > GFS_BASELINE_LOCK_STALE_MS) {
           await rm(lockDir, { recursive: true, force: true });
           continue;
@@ -996,7 +1078,22 @@ async function removeDirectoryTree(path: string): Promise<void> {
     }
   }
 
-  await runCommand('podman', ['unshare', 'rm', '-rf', path], {});
+  try {
+    await runCommand('podman', ['unshare', 'rm', '-rf', path], {});
+  } catch (error) {
+    if (isRemotePodmanUnshareUnsupportedError(error)) {
+      return;
+    }
+    throw error;
+  }
+}
+
+function isRemotePodmanUnshareUnsupportedError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    message.includes('remote podman client') &&
+    /cannot use command ["']podman unshare["']/.test(message)
+  );
 }
 
 async function tryReadCommandMajorVersion(
@@ -1398,6 +1495,28 @@ async function readBaselineMetadata(
   }
 }
 
+async function writeBaselineMetadata(
+  metadataPath: string,
+  metadata: GfsBaselineMetadata,
+): Promise<void> {
+  await writeFile(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
+}
+
+async function touchBaselineMetadata(
+  metadataPath: string,
+  mutate: (metadata: GfsBaselineMetadata | null) => GfsBaselineMetadata,
+): Promise<void> {
+  const next = mutate(await readBaselineMetadata(metadataPath));
+  await writeBaselineMetadata(metadataPath, {
+    ...next,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+async function isRecoverableBaselineRepo(repoPath: string): Promise<boolean> {
+  return pathExists(join(repoPath, '.gfs', 'HEAD'));
+}
+
 function shouldDeleteExpiredBaselineCache(input: {
   metadata: GfsBaselineMetadata | null;
   cacheMtimeMs: number;
@@ -1429,7 +1548,11 @@ async function cleanupExpiredBaselineCaches(input: {
         continue;
       }
 
-      if (entry.name.endsWith('.lock') || entry.name === input.activeCacheKey) {
+      if (
+        entry.name.endsWith('.lock') ||
+        entry.name === input.activeCacheKey ||
+        entry.name.includes(GFS_BASELINE_BUILD_SUFFIX)
+      ) {
         continue;
       }
 
@@ -1489,7 +1612,7 @@ async function tryRecoverBaselineRepo(input: {
   signal: AbortSignal;
   logger: Awaited<ReturnType<typeof getLogger>>;
 }): Promise<EnsuredGfsBaseline | null> {
-  if (!(await pathExists(input.repoPath))) {
+  if (!(await isRecoverableBaselineRepo(input.repoPath))) {
     return null;
   }
 
@@ -1502,15 +1625,14 @@ async function tryRecoverBaselineRepo(input: {
       input.repoPath,
       input.signal,
     );
-    const metadata: GfsBaselineMetadata = {
+    const metadata = createBaselineMetadata({
+      state: 'ready',
       checkpointCommit,
       postgresMajorVersion: postgresClients.majorVersion,
-      createdAt: new Date().toISOString(),
-    };
-    await writeFile(
+    });
+    await writeBaselineMetadata(
       input.metadataPath,
-      JSON.stringify(metadata, null, 2),
-      'utf8',
+      metadata,
     );
 
     input.logger.info(
@@ -1549,19 +1671,22 @@ async function prepareFreshCacheLocation(input: {
   cacheDir: string;
   logger: Awaited<ReturnType<typeof getLogger>>;
 }): Promise<{ cacheDir: string; repoPath: string; metadataPath: string }> {
+  const stagingCacheDir = buildBaselineStagingCacheDir(input.cacheDir);
   try {
-    await removeDirectoryTree(input.cacheDir);
+    await removeDirectoryTree(input.cacheDir).catch(() => undefined);
+    await removeDirectoryTree(stagingCacheDir).catch(() => undefined);
+    await mkdir(stagingCacheDir, { recursive: true });
     return {
-      cacheDir: input.cacheDir,
-      repoPath: join(input.cacheDir, 'repo'),
-      metadataPath: join(input.cacheDir, GFS_BASELINE_METADATA_FILENAME),
+      cacheDir: stagingCacheDir,
+      repoPath: join(stagingCacheDir, 'repo'),
+      metadataPath: join(stagingCacheDir, GFS_BASELINE_METADATA_FILENAME),
     };
   } catch (error) {
     if (!isPermissionDeniedError(error)) {
       throw error;
     }
 
-    const fallbackCacheDir = `${input.cacheDir}-rebuild-${randomUUID().slice(0, 8)}`;
+    const fallbackCacheDir = `${stagingCacheDir}-rebuild`;
     input.logger.warn(
       {
         cacheDir: input.cacheDir,
@@ -1579,6 +1704,67 @@ async function prepareFreshCacheLocation(input: {
   }
 }
 
+async function publishReadyBaselineCache(input: {
+  finalCacheDir: string;
+  stagingCacheDir: string;
+  logger: Awaited<ReturnType<typeof getLogger>>;
+}): Promise<string> {
+  await removeDirectoryTree(input.finalCacheDir).catch(() => undefined);
+  try {
+    await rename(input.stagingCacheDir, input.finalCacheDir);
+    return input.finalCacheDir;
+  } catch (error) {
+    if (!isPermissionDeniedError(error)) {
+      throw error;
+    }
+
+    input.logger.warn(
+      {
+        finalCacheDir: input.finalCacheDir,
+        stagingCacheDir: input.stagingCacheDir,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      'Could not atomically publish cached GFS baseline repo; keeping staging cache directory',
+    );
+    return input.stagingCacheDir;
+  }
+}
+
+async function createIsolatedValidationRepo(input: {
+  workingRoot: string;
+  cacheKey: string;
+  sourceRepoPath: string;
+  logger: Awaited<ReturnType<typeof getLogger>>;
+}): Promise<IsolatedValidationRepo> {
+  const workingDir = join(
+    input.workingRoot,
+    GFS_VALIDATION_RUNS_SUBDIR,
+    `${input.cacheKey}-${Date.now()}-${randomUUID().slice(0, 8)}`,
+  );
+  const repoPath = join(workingDir, 'repo');
+
+  await mkdir(workingDir, { recursive: true });
+
+  try {
+    await cp(input.sourceRepoPath, repoPath, { recursive: true, force: true });
+    return {
+      workingDir,
+      repoPath,
+    };
+  } catch (error) {
+    await removeDirectoryTree(workingDir).catch(() => undefined);
+    input.logger.warn(
+      {
+        workingDir,
+        sourceRepoPath: input.sourceRepoPath,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      'Failed to create isolated GFS validation repo',
+    );
+    throw error;
+  }
+}
+
 async function ensureGfsBaselineRepo(input: {
   cacheDir: string;
   repoPath: string;
@@ -1588,7 +1774,10 @@ async function ensureGfsBaselineRepo(input: {
   logger: Awaited<ReturnType<typeof getLogger>>;
 }): Promise<EnsuredGfsBaseline> {
   const existingMetadata = await readBaselineMetadata(input.metadataPath);
-  if (existingMetadata && (await pathExists(input.repoPath))) {
+  if (
+    isReadyBaselineMetadata(existingMetadata) &&
+    (await isRecoverableBaselineRepo(input.repoPath))
+  ) {
     return {
       cacheDir: input.cacheDir,
       repoPath: input.repoPath,
@@ -1615,6 +1804,10 @@ async function ensureGfsBaselineRepo(input: {
     logger: input.logger,
   });
   await mkdir(freshLocation.repoPath, { recursive: true });
+  await writeBaselineMetadata(
+    freshLocation.metadataPath,
+    createBaselineMetadata({ state: 'building' }),
+  );
 
   const postgresClients = await resolvePostgresClientBinaries(
     input.connectionUrl,
@@ -1626,16 +1819,86 @@ async function ensureGfsBaselineRepo(input: {
   );
   let shouldStopCompute = false;
 
-  await runCommand(
-    postgresClients.pgDump,
-    ['--format=plain', '--no-owner', '--no-privileges', '--file', dumpPath],
-    {
-      env: buildPostgresCliEnv(input.connectionUrl),
-      signal: input.signal,
+  await touchBaselineMetadata(freshLocation.metadataPath, (metadata) =>
+    createBaselineMetadata({
+      state: 'building',
+      createdAt: metadata?.createdAt,
+    }),
+  );
+
+  logValidationStage({
+    logger: input.logger,
+    stage: 'baseline.pg_dump.start',
+    message: 'Starting PostgreSQL baseline dump for GFS validation',
+    metadata: {
+      cacheDir: freshLocation.cacheDir,
+      repoPath: freshLocation.repoPath,
+      dumpPath,
+      timeoutMs: PG_DUMP_TIMEOUT_MS,
     },
+  });
+  const pgDumpStartedAt = Date.now();
+  const pgDumpProgressInterval = setInterval(() => {
+    void stat(dumpPath)
+      .then((dumpStat) => {
+        logValidationStage({
+          logger: input.logger,
+          stage: 'baseline.pg_dump.progress',
+          message: 'PostgreSQL baseline dump still running',
+          metadata: {
+            dumpPath,
+            elapsedMs: Date.now() - pgDumpStartedAt,
+            dumpBytes: dumpStat.size,
+          },
+        });
+      })
+      .catch(() => undefined);
+  }, 30_000);
+
+  try {
+    await runCommand(
+      postgresClients.pgDump,
+      ['--format=plain', '--no-owner', '--no-privileges', '--file', dumpPath],
+      {
+        env: buildPostgresCliEnv(input.connectionUrl),
+        signal: input.signal,
+        timeoutMs: PG_DUMP_TIMEOUT_MS,
+      },
+    );
+  } finally {
+    clearInterval(pgDumpProgressInterval);
+  }
+
+  const dumpStat = await stat(dumpPath).catch(() => null);
+  logValidationStage({
+    logger: input.logger,
+    stage: 'baseline.pg_dump.complete',
+    message: 'Completed PostgreSQL baseline dump for GFS validation',
+    metadata: {
+      dumpPath,
+      elapsedMs: Date.now() - pgDumpStartedAt,
+      dumpBytes: dumpStat?.size ?? null,
+    },
+  });
+
+  await touchBaselineMetadata(freshLocation.metadataPath, (metadata) =>
+    createBaselineMetadata({
+      state: 'building',
+      postgresMajorVersion: postgresClients.majorVersion,
+      createdAt: metadata?.createdAt,
+    }),
   );
 
   try {
+    logValidationStage({
+      logger: input.logger,
+      stage: 'baseline.gfs_init.start',
+      message: 'Initializing cached GFS baseline repository',
+      metadata: {
+        repoPath: freshLocation.repoPath,
+        postgresMajorVersion: postgresClients.majorVersion,
+      },
+    });
     await runCommand(
       'gfs',
       [
@@ -1647,13 +1910,46 @@ async function ensureGfsBaselineRepo(input: {
       ],
       { cwd: freshLocation.repoPath, signal: input.signal },
     );
-
-    input.logger.info(
-      {
+    logValidationStage({
+      logger: input.logger,
+      stage: 'baseline.gfs_config.start',
+      message: 'Configuring cached GFS baseline repository for audit compatibility',
+      metadata: {
+        repoPath: freshLocation.repoPath,
+        storageReflink: false,
+      },
+    });
+    await runCommand(
+      'gfs',
+      ['config', 'storage.reflink', 'false'],
+      { cwd: freshLocation.repoPath, signal: input.signal },
+    );
+    logValidationStage({
+      logger: input.logger,
+      stage: 'baseline.gfs_config.complete',
+      message: 'Configured cached GFS baseline repository for audit compatibility',
+      metadata: {
+        repoPath: freshLocation.repoPath,
+        storageReflink: false,
+      },
+    });
+    logValidationStage({
+      logger: input.logger,
+      stage: 'baseline.gfs_init.complete',
+      message: 'Initialized cached GFS baseline repository',
+      metadata: {
         repoPath: freshLocation.repoPath,
       },
-      'Starting GFS compute for cached baseline repo',
-    );
+    });
+
+    logValidationStage({
+      logger: input.logger,
+      stage: 'baseline.compute.start',
+      message: 'Starting GFS compute for cached baseline repo',
+      metadata: {
+        repoPath: freshLocation.repoPath,
+      },
+    });
     try {
       await runCommand('gfs', ['compute', 'start'], {
         cwd: freshLocation.repoPath,
@@ -1670,44 +1966,66 @@ async function ensureGfsBaselineRepo(input: {
       );
       throw error;
     }
-    input.logger.info(
-      {
+    logValidationStage({
+      logger: input.logger,
+      stage: 'baseline.compute.ready',
+      message: 'GFS compute started for cached baseline repo',
+      metadata: {
         repoPath: freshLocation.repoPath,
       },
-      'GFS compute started for cached baseline repo',
-    );
+    });
 
     const importStatus = await readGfsConnectionUrl(
       freshLocation.repoPath,
       input.signal,
     );
-    input.logger.info(
-      {
+    logValidationStage({
+      logger: input.logger,
+      stage: 'baseline.compute.connection',
+      message: 'Read GFS PostgreSQL connection details for cached baseline repo',
+      metadata: {
         repoPath: freshLocation.repoPath,
         host: new URL(importStatus.connectionUrl).hostname,
         port: new URL(importStatus.connectionUrl).port || '5432',
       },
-      'Read GFS PostgreSQL connection details for cached baseline repo',
-    );
+    });
     await waitForPostgresReady(
       postgresClients.psql,
       importStatus.connectionUrl,
       input.signal,
       input.logger,
     );
-    input.logger.info(
-      {
+    logValidationStage({
+      logger: input.logger,
+      stage: 'baseline.import.start',
+      message: 'Beginning baseline dump import into GFS cached repo',
+      metadata: {
         repoPath: freshLocation.repoPath,
         dumpPath,
       },
-      'Beginning baseline dump import into GFS cached repo',
-    );
+    });
     await runGfsImportWithRetry(
       freshLocation.repoPath,
       dumpPath,
       input.signal,
       input.logger,
     );
+    logValidationStage({
+      logger: input.logger,
+      stage: 'baseline.import.complete',
+      message: 'Finished baseline dump import into GFS cached repo',
+      metadata: {
+        repoPath: freshLocation.repoPath,
+      },
+    });
+    logValidationStage({
+      logger: input.logger,
+      stage: 'baseline.commit.start',
+      message: 'Creating cached baseline checkpoint commit',
+      metadata: {
+        repoPath: freshLocation.repoPath,
+      },
+    });
     await runCommand(
       'gfs',
       ['commit', '-m', 'baseline snapshot before audit remediation'],
@@ -1718,28 +2036,82 @@ async function ensureGfsBaselineRepo(input: {
       freshLocation.repoPath,
       input.signal,
     );
-    const metadata: GfsBaselineMetadata = {
+    if (shouldStopCompute) {
+      logValidationStage({
+        logger: input.logger,
+        stage: 'baseline.compute.stop.start',
+        message: 'Stopping GFS compute before publishing cached baseline repo',
+        metadata: {
+          repoPath: freshLocation.repoPath,
+        },
+      });
+      await runCommand('gfs', ['compute', 'stop'], {
+        cwd: freshLocation.repoPath,
+        signal: input.signal,
+        timeoutMs: COMPUTE_STOP_TIMEOUT_MS,
+      });
+      shouldStopCompute = false;
+      logValidationStage({
+        logger: input.logger,
+        stage: 'baseline.compute.stop.complete',
+        message: 'Stopped GFS compute before publishing cached baseline repo',
+        metadata: {
+          repoPath: freshLocation.repoPath,
+        },
+      });
+    }
+    const metadata = createBaselineMetadata({
+      state: 'ready',
       checkpointCommit,
       postgresMajorVersion: postgresClients.majorVersion,
-      createdAt: new Date().toISOString(),
-    };
-    await writeFile(
+    });
+    await writeBaselineMetadata(
       freshLocation.metadataPath,
-      JSON.stringify(metadata, null, 2),
-      'utf8',
+      metadata,
     );
+    logValidationStage({
+      logger: input.logger,
+      stage: 'baseline.commit.complete',
+      message: 'Created cached baseline checkpoint commit',
+      metadata: {
+        repoPath: freshLocation.repoPath,
+        checkpointCommit,
+      },
+    });
+    const publishedCacheDir = await publishReadyBaselineCache({
+      finalCacheDir: input.cacheDir,
+      stagingCacheDir: freshLocation.cacheDir,
+      logger: input.logger,
+    });
+    logValidationStage({
+      logger: input.logger,
+      stage: 'baseline.publish.complete',
+      message: 'Published ready cached GFS baseline repo',
+      metadata: {
+        cacheDir: publishedCacheDir,
+        checkpointCommit,
+      },
+    });
 
     return {
-      cacheDir: freshLocation.cacheDir,
-      repoPath: freshLocation.repoPath,
+      cacheDir: publishedCacheDir,
+      repoPath: join(publishedCacheDir, 'repo'),
       checkpointCommit,
       postgresMajorVersion: postgresClients.majorVersion,
       psqlBinary: postgresClients.psql,
       pgDumpBinary: postgresClients.pgDump,
       reused: false,
-      computeRunning: true,
+      computeRunning: false,
     };
   } catch (error) {
+    await writeBaselineMetadata(
+      freshLocation.metadataPath,
+      createBaselineMetadata({
+        state: 'failed',
+        postgresMajorVersion: postgresClients.majorVersion,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    ).catch(() => undefined);
     if (shouldStopCompute) {
       await runCommand('gfs', ['compute', 'stop'], {
         cwd: freshLocation.repoPath,
@@ -1830,6 +2202,8 @@ export const __testables = {
   cleanupExpiredBaselineCaches,
   extractExplainJsonPayload,
   isExistingBranchError,
+  isPermissionDeniedError,
+  isRemotePodmanUnshareUnsupportedError,
   isRetryablePostgresStartupError,
   partitionActionStatements,
   parseExplainPlanSummary,
@@ -1955,7 +2329,6 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
       const baselineRoot = join(workingRoot, GFS_BASELINE_CACHE_SUBDIR);
       await mkdir(baselineRoot, { recursive: true });
       const cacheKey = buildBaselineCacheKey({
-        conversationId: ctx.conversationId,
         datasourceId: datasource.id,
         connectionUrl,
       });
@@ -2001,6 +2374,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             async () => {
           let shouldStopCompute = false;
           let activeRepoPath = repoPath;
+          let activeWorkingDir: string | null = null;
 
           try {
             await runCommand('gfs', ['version'], { signal: ctx.abort });
@@ -2015,6 +2389,38 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             });
             shouldStopCompute = baseline.computeRunning;
             activeRepoPath = baseline.repoPath;
+            logValidationStage({
+              logger,
+              stage: 'validation.baseline.ready',
+              message: baseline.reused
+                ? 'Using existing cached GFS baseline repo'
+                : 'Using newly created cached GFS baseline repo',
+              metadata: {
+                cacheDir: baseline.cacheDir,
+                repoPath: activeRepoPath,
+                checkpointCommit: baseline.checkpointCommit,
+                reused: baseline.reused,
+              },
+            });
+
+            const isolatedRepo = await createIsolatedValidationRepo({
+              workingRoot,
+              cacheKey,
+              sourceRepoPath: baseline.repoPath,
+              logger,
+            });
+            activeWorkingDir = isolatedRepo.workingDir;
+            activeRepoPath = isolatedRepo.repoPath;
+            logValidationStage({
+              logger,
+              stage: 'validation.repo.ready',
+              message: 'Prepared isolated GFS repo for remediation validation',
+              metadata: {
+                workingDir: activeWorkingDir,
+                repoPath: activeRepoPath,
+                baselineRepoPath: baseline.repoPath,
+              },
+            });
 
             await ctx.metadata({
               title: baseline.reused
@@ -2024,6 +2430,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
                 cacheKey,
                 cacheDir: baseline.cacheDir,
                 repoPath: activeRepoPath,
+                baselineRepoPath: baseline.repoPath,
                 checkpointCommit: baseline.checkpointCommit,
                 postgresMajorVersion: baseline.postgresMajorVersion,
                 psqlBinary: baseline.psqlBinary,
@@ -2038,6 +2445,16 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
               signal: ctx.abort,
             });
             const effectiveBranchName = checkoutResult.branchName;
+            logValidationStage({
+              logger,
+              stage: 'validation.branch.ready',
+              message: 'Prepared isolated GFS audit branch for remediation validation',
+              metadata: {
+                repoPath: activeRepoPath,
+                branchName: effectiveBranchName,
+                adjusted: checkoutResult.adjusted,
+              },
+            });
             if (checkoutResult.adjusted) {
               await ctx.metadata({
                 title: 'Adjusted GFS branch name',
@@ -2049,6 +2466,15 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             }
 
             if (!baseline.computeRunning) {
+              logValidationStage({
+                logger,
+                stage: 'validation.compute.start',
+                message: 'Starting GFS compute for remediation validation branch',
+                metadata: {
+                  repoPath: activeRepoPath,
+                  branchName: effectiveBranchName,
+                },
+              });
               await runCommand('gfs', ['compute', 'start'], {
                 cwd: activeRepoPath,
                 signal: ctx.abort,
@@ -2060,6 +2486,16 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
               activeRepoPath,
               ctx.abort,
             );
+            logValidationStage({
+              logger,
+              stage: 'validation.benchmark.before.start',
+              message: 'Running before benchmark on GFS validation branch',
+              metadata: {
+                repoPath: activeRepoPath,
+                branchName: effectiveBranchName,
+                validationType: params.validationType,
+              },
+            });
             await waitForPostgresReady(
               baseline.psqlBinary,
               statusBefore.connectionUrl,
@@ -2076,6 +2512,16 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
 
             const executedActions = [...actionStatements];
             for (const statement of partitionedStatements.persistentStatements) {
+              logValidationStage({
+                logger,
+                stage: 'validation.action.apply',
+                message: 'Applying persistent remediation statement in GFS validation branch',
+                metadata: {
+                  repoPath: activeRepoPath,
+                  branchName: effectiveBranchName,
+                  statement,
+                },
+              });
               await runPsqlWithRetry(
                 baseline.psqlBinary,
                 statusBefore.connectionUrl,
@@ -2085,6 +2531,16 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             }
 
             if (partitionedStatements.persistentStatements.length > 0) {
+              logValidationStage({
+                logger,
+                stage: 'validation.action.commit',
+                message: 'Creating GFS commit for persistent remediation statements',
+                metadata: {
+                  repoPath: activeRepoPath,
+                  branchName: effectiveBranchName,
+                  statements: partitionedStatements.persistentStatements.length,
+                },
+              });
               await runCommand(
                 'gfs',
                 ['commit', '-m', 'apply audit remediation candidate'],
@@ -2119,6 +2575,15 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
                       partitionedStatements.sessionTeardownStatements,
                   })
                 : buildExplainSql(params.validationQuery);
+            logValidationStage({
+              logger,
+              stage: 'validation.benchmark.after.start',
+              message: 'Running after benchmark on GFS validation branch',
+              metadata: {
+                repoPath: activeRepoPath,
+                branchName: statusAfter.branch,
+              },
+            });
             const after = parseExplainAnalysis(
               await runPsqlWithRetry(
                 baseline.psqlBinary,
@@ -2144,6 +2609,20 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
               params.validationType,
               actionStatements,
             );
+            logValidationStage({
+              logger,
+              stage: 'validation.complete',
+              message: 'Completed GFS remediation validation benchmark',
+              metadata: {
+                repoPath: activeRepoPath,
+                branchName: statusAfter.branch,
+                beforeMs: before.totalTimeMs,
+                afterMs: after.totalTimeMs,
+                deltaMs: totalDeltaMs,
+                deltaPct,
+                recommendationStatus: assessment.recommendationStatus,
+              },
+            });
 
             return {
               originalDatabaseUnchanged: true,
@@ -2188,6 +2667,18 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
                       error instanceof Error ? error.message : String(error),
                   },
                   'Failed to stop GFS compute after remediation validation',
+                );
+              });
+            }
+            if (activeWorkingDir) {
+              await removeDirectoryTree(activeWorkingDir).catch((error) => {
+                logger.warn(
+                  {
+                    workingDir: activeWorkingDir,
+                    error:
+                      error instanceof Error ? error.message : String(error),
+                  },
+                  'Failed to remove isolated GFS validation repo after remediation validation',
                 );
               });
             }

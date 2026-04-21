@@ -41,12 +41,24 @@ process.env.WORKSPACE = isAbsolute(raw) ? raw : resolve(serverRoot, raw);
 
 const containerHostOverride =
   process.env.CONTAINER_HOST?.trim() || process.env.DOCKER_HOST?.trim();
+const dockerSocketPath = '/var/run/docker.sock';
 const runtimeDir =
   process.env.XDG_RUNTIME_DIR?.trim() ||
   (typeof process.getuid === 'function' ? `/run/user/${process.getuid()}` : '');
 const podmanSocketPath = runtimeDir ? join(runtimeDir, 'podman', 'podman.sock') : '';
+const shouldPreferDockerSocket =
+  !containerHostOverride && existsSync(dockerSocketPath);
 const shouldPreferRootlessPodman =
-  !containerHostOverride && podmanSocketPath && existsSync(podmanSocketPath);
+  !containerHostOverride &&
+  !shouldPreferDockerSocket &&
+  podmanSocketPath &&
+  existsSync(podmanSocketPath);
+
+if (shouldPreferDockerSocket) {
+  const dockerSocketUrl = `unix://${dockerSocketPath}`;
+  process.env.DOCKER_HOST = dockerSocketUrl;
+  process.env.CONTAINER_HOST = dockerSocketUrl;
+}
 
 if (shouldPreferRootlessPodman) {
   const podmanSocketUrl = `unix://${podmanSocketPath}`;
@@ -67,6 +79,13 @@ if (shouldPreferRootlessPodman) {
   logger.info(
     { dockerHost: process.env.DOCKER_HOST },
     'Using rootless Podman socket for container-backed tools',
+  );
+}
+
+if (shouldPreferDockerSocket) {
+  logger.info(
+    { dockerHost: process.env.DOCKER_HOST },
+    'Using Docker socket for container-backed tools',
   );
 }
 

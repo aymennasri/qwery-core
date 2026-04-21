@@ -24,8 +24,6 @@ export const DbPerformanceAuditAgent = Agent.define('db-performance-audit', {
       validate_remediation_in_gfs_cli: true,
       runQuery: true,
       runQueries: true,
-      todowrite: true,
-      todoread: true,
     },
   },
   systemPrompt: DB_PERFORMANCE_AUDIT_PROMPT,

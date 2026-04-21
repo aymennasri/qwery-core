@@ -36,6 +36,8 @@ describe('DbPerformanceAuditAgent', () => {
     expect(tools?.explain_query_plan).toBe(true);
     expect(tools?.runQuery).toBe(true);
     expect(tools?.runQueries).toBe(true);
+    expect(tools?.todowrite).toBeUndefined();
+    expect(tools?.todoread).toBeUndefined();
   });
 
   it('keeps enough step budget for multi-phase audits without todo tools', () => {
@@ -105,6 +107,8 @@ describe('DbPerformanceAuditAgent', () => {
         'runQueries',
       ]),
     );
+    expect(result.tools).not.toHaveProperty('todowrite');
+    expect(result.tools).not.toHaveProperty('todoread');
   });
 
   it('keeps audit-only tools out of ask and query agents', async () => {

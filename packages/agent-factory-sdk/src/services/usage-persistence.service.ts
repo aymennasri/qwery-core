@@ -1,4 +1,5 @@
 import { type LanguageModelUsage } from 'ai';
+import { Code } from '@qwery/domain/common';
 import {
   IUsageRepository,
   IConversationRepository,
@@ -7,6 +8,7 @@ import {
 import { CreateUsageService } from '@qwery/domain/services';
 import { CreateUsageInput } from '@qwery/domain/usecases';
 import { getUsageFromCatalog } from '@qwery/shared/model-cost';
+import { getLogger } from '@qwery/shared/logger';
 import { getModelsCatalog } from '../model-catalog';
 
 /**
@@ -58,6 +60,17 @@ export class UsagePersistenceService {
     model: string,
     userId: string = 'system',
   ): Promise<void> {
+    const conversation =
+      (await this.conversationRepository.findBySlug(this.conversationSlug)) ??
+      (await this.conversationRepository.findById(this.conversationSlug));
+    if (!conversation) {
+      const logger = await getLogger();
+      logger.warn(
+        `[UsagePersistenceService] Conversation '${this.conversationSlug}' not found, skipping usage persistence`,
+      );
+      return;
+    }
+
     const catalog = await getModelsCatalog();
     const [providerId, modelId] = model.includes('/')
       ? model.split('/', 2)
@@ -94,9 +107,21 @@ export class UsagePersistenceService {
       contextSize,
     );
 
-    await useCase.execute({
-      input: input as CreateUsageInput,
-      conversationSlug: this.conversationSlug,
-    });
+    try {
+      await useCase.execute({
+        input: input as CreateUsageInput,
+        conversationSlug: this.conversationSlug,
+      });
+    } catch (error) {
+      const code = (error as { code?: number } | undefined)?.code;
+      if (code === Code.CONVERSATION_NOT_FOUND_ERROR.code) {
+        const logger = await getLogger();
+        logger.warn(
+          `[UsagePersistenceService] Conversation '${this.conversationSlug}' disappeared before usage persistence completed, skipping`,
+        );
+        return;
+      }
+      throw error;
+    }
   }
 }

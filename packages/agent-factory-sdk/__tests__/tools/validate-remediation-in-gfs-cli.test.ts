@@ -89,6 +89,34 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
     ).toBe(false);
   });
 
+  it('treats read-only cleanup failures as privileged filesystem errors', () => {
+    expect(
+      __testables.isPermissionDeniedError(
+        Object.assign(new Error('read-only file system'), { code: 'EROFS' }),
+      ),
+    ).toBe(true);
+    expect(
+      __testables.isPermissionDeniedError(
+        Object.assign(new Error('busy mount'), { code: 'EBUSY' }),
+      ),
+    ).toBe(true);
+  });
+
+  it('detects unsupported podman unshare cleanup on remote clients', () => {
+    expect(
+      __testables.isRemotePodmanUnshareUnsupportedError(
+        new Error(
+          'podman command failed: Error: cannot use command "podman unshare" with the remote podman client',
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      __testables.isRemotePodmanUnshareUnsupportedError(
+        new Error('podman command failed: permission denied'),
+      ),
+    ).toBe(false);
+  });
+
   it('builds version-aware binary candidates before generic fallbacks', () => {
     expect(__testables.buildVersionedBinaryCandidates('pg_dump', '16')).toEqual(
       [
@@ -131,27 +159,23 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
   it('builds a stable baseline cache key', () => {
     expect(
       __testables.buildBaselineCacheKey({
-        conversationId: 'conversation-a',
         datasourceId: 'datasource-1',
         connectionUrl: 'postgres://user:pass@db.example.com:5432/app',
       }),
     ).toBe(
       __testables.buildBaselineCacheKey({
-        conversationId: 'conversation-a',
         datasourceId: 'datasource-1',
         connectionUrl: 'postgres://user:pass@db.example.com:5432/app',
       }),
     );
     expect(
       __testables.buildBaselineCacheKey({
-        conversationId: 'conversation-a',
         datasourceId: 'datasource-1',
         connectionUrl: 'postgres://user:pass@db.example.com:5432/app',
       }),
     ).not.toBe(
       __testables.buildBaselineCacheKey({
-        conversationId: 'conversation-b',
-        datasourceId: 'datasource-1',
+        datasourceId: 'datasource-2',
         connectionUrl: 'postgres://user:pass@db.example.com:5432/app',
       }),
     );
@@ -301,9 +325,11 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
     expect(
       __testables.shouldDeleteExpiredBaselineCache({
         metadata: {
+          state: 'ready',
           checkpointCommit: 'abc1234',
           postgresMajorVersion: '16',
           createdAt: '2026-04-08T00:00:00.000Z',
+          updatedAt: '2026-04-08T00:00:00.000Z',
         },
         cacheMtimeMs: nowMs,
         nowMs,
@@ -313,9 +339,11 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
     expect(
       __testables.shouldDeleteExpiredBaselineCache({
         metadata: {
+          state: 'ready',
           checkpointCommit: 'abc1234',
           postgresMajorVersion: '16',
           createdAt: '2026-04-15T00:00:00.000Z',
+          updatedAt: '2026-04-15T00:00:00.000Z',
         },
         cacheMtimeMs: nowMs,
         nowMs,
@@ -338,9 +366,11 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
         join(cacheDir, 'baseline.json'),
         JSON.stringify(
           {
+            state: 'ready',
             checkpointCommit: 'abc1234',
             postgresMajorVersion: '16',
             createdAt,
+            updatedAt: createdAt,
           },
           null,
           2,
