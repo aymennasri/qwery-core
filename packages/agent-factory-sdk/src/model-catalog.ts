@@ -12,19 +12,14 @@ export const SUPPORTED_MODELS = [
     value: 'anthropic/claude-sonnet-4-5-20250929',
   },
   {
-    name: 'Ollama Cloud • DeepSeek V3.1 671B',
-    shortName: 'DeepSeek V3.1 671B',
-    value: 'ollama-cloud/deepseek-v3.1:671b',
+    name: 'Ollama Cloud • DeepSeek V3.2',
+    shortName: 'DeepSeek V3.2',
+    value: 'ollama-cloud/deepseek-v3.2',
   },
   {
-    name: 'Ollama Cloud • Gemini 3 Flash (preview)',
-    shortName: 'Gemini 3 Flash',
-    value: 'ollama-cloud/gemini-3-flash-preview',
-  },
-  {
-    name: 'Ollama Cloud • Gemini 3 Pro (preview)',
-    shortName: 'Gemini 3 Pro',
-    value: 'ollama-cloud/gemini-3-pro-preview',
+    name: 'Ollama Cloud • Devstral Small 2 24B',
+    shortName: 'Devstral S2 24B',
+    value: 'ollama-cloud/devstral-small-2:24b',
   },
   {
     name: 'Ollama Cloud • Gemma 4 31B',
@@ -32,29 +27,14 @@ export const SUPPORTED_MODELS = [
     value: 'ollama-cloud/gemma4:31b',
   },
   {
-    name: 'Ollama Cloud • GLM 5',
-    shortName: 'GLM 5',
-    value: 'ollama-cloud/glm-5',
-  },
-  {
-    name: 'Ollama Cloud • GLM 5.1',
-    shortName: 'GLM 5.1',
-    value: 'ollama-cloud/glm-5.1',
+    name: 'Ollama Cloud • GLM 4.7',
+    shortName: 'GLM 4.7',
+    value: 'ollama-cloud/glm-4.7',
   },
   {
     name: 'Ollama Cloud • GPT OSS 120B',
     shortName: 'GPT OSS 120B',
     value: 'ollama-cloud/gpt-oss:120b',
-  },
-  {
-    name: 'Ollama Cloud • Kimi K2.5',
-    shortName: 'Kimi K2.5',
-    value: 'ollama-cloud/kimi-k2.5',
-  },
-  {
-    name: 'Ollama Cloud • Kimi K2.6 Cloud',
-    shortName: 'Kimi K2.6',
-    value: 'ollama-cloud/kimi-k2.6:cloud',
   },
   {
     name: 'Ollama Cloud • MiniMax M2.5',
@@ -80,11 +60,6 @@ export const SUPPORTED_MODELS = [
     name: 'Ollama Cloud • Qwen 3.5 397B',
     shortName: 'Qwen 3.5 397B',
     value: 'ollama-cloud/qwen3.5:397b',
-  },
-  {
-    name: 'Ollama Cloud • Qwen 3 Coder Next',
-    shortName: 'Qwen 3 Coder Next',
-    value: 'ollama-cloud/qwen3-coder-next',
   },
   {
     name: 'WebLLM • Llama 3.1 8B',
