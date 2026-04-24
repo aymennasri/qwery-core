@@ -3455,14 +3455,14 @@
     "name": "Ollama Cloud",
     "doc": "https://docs.ollama.com/cloud",
     "models": {
-      "deepseek-v3.2": {
-        "id": "deepseek-v3.2",
-        "name": "deepseek-v3.2",
+      "deepseek-v3.1:671b": {
+        "id": "deepseek-v3.1:671b",
+        "name": "deepseek-v3.1:671b",
         "family": "deepseek",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
-        "release_date": "2025-06-15",
+        "release_date": "2025-08-21",
         "last_updated": "2026-01-19",
         "modalities": {
           "input": [
@@ -3475,17 +3475,41 @@
         "open_weights": true,
         "limit": {
           "context": 163840,
+          "output": 163840
+        }
+      },
+      "gemini-3-flash-preview": {
+        "id": "gemini-3-flash-preview",
+        "name": "gemini-3-flash-preview",
+        "family": "gemini-flash",
+        "attachment": false,
+        "reasoning": true,
+        "tool_call": true,
+        "knowledge": "2025-01",
+        "release_date": "2025-12-17",
+        "last_updated": "2026-01-19",
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 1048576,
           "output": 65536
         }
       },
-      "devstral-small-2:24b": {
-        "id": "devstral-small-2:24b",
-        "name": "devstral-small-2:24b",
-        "family": "devstral",
+      "gemini-3-pro-preview": {
+        "id": "gemini-3-pro-preview",
+        "name": "gemini-3-pro-preview",
+        "family": "gemini-pro",
         "attachment": true,
-        "reasoning": false,
+        "reasoning": true,
         "tool_call": true,
-        "release_date": "2025-12-09",
+        "release_date": "2025-11-18",
         "last_updated": "2026-01-19",
         "modalities": {
           "input": [
@@ -3498,45 +3522,23 @@
         },
         "open_weights": true,
         "limit": {
-          "context": 262144,
-          "output": 262144
+          "context": 1048576,
+          "output": 64000
         }
       },
-      "gemma4:31b": {
-        "id": "gemma4:31b",
-        "name": "gemma4:31b",
-        "family": "gemma",
-        "knowledge": "2025-01",
-        "attachment": true,
-        "reasoning": true,
-        "tool_call": true,
-        "release_date": "2026-04-02",
-        "last_updated": "2026-04-08",
-        "modalities": {
-          "input": [
-            "text",
-            "image"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "open_weights": true,
-        "limit": {
-          "context": 262144,
-          "output": 8192
-        }
-      },
-      "glm-4.7": {
-        "id": "glm-4.7",
-        "name": "glm-4.7",
+      "glm-5": {
+        "id": "glm-5",
+        "name": "glm-5",
         "family": "glm",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
-        "release_date": "2025-12-22",
-        "last_updated": "2026-01-19",
+        "release_date": "2026-02-11",
+        "last_updated": "2026-02-11",
         "open_weights": true,
+        "interleaved": {
+          "field": "reasoning_content"
+        },
         "modalities": {
           "input": [
             "text"
@@ -3545,6 +3547,32 @@
             "text"
           ]
         },
+        "limit": {
+          "context": 202752,
+          "output": 131072
+        }
+      },
+      "glm-5.1": {
+        "id": "glm-5.1",
+        "name": "glm-5.1",
+        "family": "glm",
+        "attachment": false,
+        "reasoning": true,
+        "tool_call": true,
+        "interleaved": {
+          "field": "reasoning_content"
+        },
+        "release_date": "2026-03-27",
+        "last_updated": "2026-04-07",
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
         "limit": {
           "context": 202752,
           "output": 131072
@@ -3571,6 +3599,54 @@
         "limit": {
           "context": 131072,
           "output": 32768
+        }
+      },
+      "kimi-k2.5": {
+        "id": "kimi-k2.5",
+        "name": "kimi-k2.5",
+        "family": "kimi",
+        "attachment": true,
+        "reasoning": true,
+        "tool_call": true,
+        "release_date": "2026-01-27",
+        "last_updated": "2026-01-27",
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 262144,
+          "output": 262144
+        }
+      },
+      "kimi-k2.6:cloud": {
+        "id": "kimi-k2.6:cloud",
+        "name": "kimi-k2.6:cloud",
+        "family": "kimi",
+        "attachment": true,
+        "reasoning": true,
+        "tool_call": true,
+        "release_date": "2026-04-20",
+        "last_updated": "2026-04-20",
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 262144,
+          "output": 262144
         }
       },
       "minimax-m2.5": {
@@ -3669,6 +3745,75 @@
         "limit": {
           "context": 262144,
           "output": 81920
+        }
+      },
+      "qwen3-coder:480b": {
+        "id": "qwen3-coder:480b",
+        "name": "qwen3-coder:480b",
+        "family": "qwen",
+        "attachment": false,
+        "reasoning": false,
+        "tool_call": true,
+        "release_date": "2025-07-22",
+        "last_updated": "2026-01-19",
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 262144,
+          "output": 65536
+        }
+      },
+      "nemotron-3-super": {
+        "id": "nemotron-3-super",
+        "name": "nemotron-3-super",
+        "family": "nemotron",
+        "attachment": false,
+        "reasoning": true,
+        "tool_call": true,
+        "release_date": "2026-03-11",
+        "last_updated": "2026-03-12",
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 262144,
+          "output": 65536
+        }
+      },
+      "devstral-2:123b": {
+        "id": "devstral-2:123b",
+        "name": "devstral-2:123b",
+        "family": "devstral",
+        "attachment": false,
+        "reasoning": false,
+        "tool_call": true,
+        "release_date": "2025-12-09",
+        "last_updated": "2026-01-19",
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 262144,
+          "output": 262144
         }
       }
     }
