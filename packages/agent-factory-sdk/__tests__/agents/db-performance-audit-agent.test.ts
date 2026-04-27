@@ -58,7 +58,7 @@ describe('DbPerformanceAuditAgent', () => {
       'Prefer reversible experiments before persistent changes',
       'Place `SET LOCAL`/`SET` and `RESET` statements in `actionStatements`',
       'validationQuery` must stay a read-only representative `SELECT` or `WITH` query',
-      'Never batch multiple `validate_remediation_in_gfs_cli` calls in the same assistant turn',
+      'Run `validate_remediation_in_gfs_cli` validations one at a time',
       'Use the original datasource only for read-only diagnostics and evidence gathering',
       '| Recommendation | Validation Type | GFS Branch | Checkpoint Commit | Action Taken | Before | After | Delta | Rollback | Outcome |',
       'Audit incomplete: not all solutions could be executed in GFS.',
