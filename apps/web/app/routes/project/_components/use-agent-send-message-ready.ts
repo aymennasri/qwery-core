@@ -96,12 +96,18 @@ export function useAgentSendMessageReady({
             ? selectedDatasources
             : undefined;
 
-        if (datasourcesToUse && datasourcesToUse.length > 0 && conversation?.id) {
+        if (
+          datasourcesToUse &&
+          datasourcesToUse.length > 0 &&
+          conversation?.id
+        ) {
           const currentSorted = [...conversationDatasources].sort();
           const nextSorted = [...datasourcesToUse].sort();
           const datasourcesChanged =
             currentSorted.length !== nextSorted.length ||
-            !currentSorted.every((datasourceId, index) => datasourceId === nextSorted[index]);
+            !currentSorted.every(
+              (datasourceId, index) => datasourceId === nextSorted[index],
+            );
 
           if (datasourcesChanged) {
             try {
@@ -161,10 +167,7 @@ export function useAgentSendMessageReady({
           },
         );
 
-        if (
-          setMessagesRef.current &&
-          Object.keys(messageMetadata).length > 0
-        ) {
+        if (setMessagesRef.current && Object.keys(messageMetadata).length > 0) {
           if (sendMessageRafIdRef.current != null) {
             cancelAnimationFrame(sendMessageRafIdRef.current);
           }

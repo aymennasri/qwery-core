@@ -462,12 +462,7 @@ function QweryAgentUIContent(props: QweryAgentUIProps) {
     };
 
     void run();
-  }, [
-    agents,
-    effectiveAgentId,
-    sendMessageWithDefaults,
-    status,
-  ]);
+  }, [agents, effectiveAgentId, sendMessageWithDefaults, status]);
 
   // Play notification sound when agent response completes
   useCompletionSound(status);
