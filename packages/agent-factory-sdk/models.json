@@ -3502,6 +3502,55 @@
           "output": 65536
         }
       },
+      "gemma4:31b-cloud": {
+        "id": "gemma4:31b-cloud",
+        "name": "gemma4:31b-cloud",
+        "family": "gemma",
+        "attachment": true,
+        "reasoning": true,
+        "tool_call": true,
+        "release_date": "2026-04-06",
+        "last_updated": "2026-04-06",
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 262144,
+          "output": 65536
+        }
+      },
+      "gemma4:31b": {
+        "id": "gemma4:31b",
+        "name": "gemma4:31b",
+        "family": "gemma",
+        "attachment": true,
+        "reasoning": true,
+        "tool_call": true,
+        "knowledge": "2025-01",
+        "release_date": "2026-04-02",
+        "last_updated": "2026-04-08",
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 262144,
+          "output": 8192
+        }
+      },
       "gemini-3-pro-preview": {
         "id": "gemini-3-pro-preview",
         "name": "gemini-3-pro-preview",
@@ -3682,7 +3731,6 @@
         "tool_call": true,
         "release_date": "2026-03-18",
         "last_updated": "2026-03-18",
-        "open_weights": true,
         "modalities": {
           "input": [
             "text"
@@ -3691,9 +3739,33 @@
             "text"
           ]
         },
+        "open_weights": true,
         "limit": {
           "context": 204800,
           "output": 131072
+        }
+      },
+      "nemotron-3-super": {
+        "id": "nemotron-3-super",
+        "name": "nemotron-3-super",
+        "family": "nemotron",
+        "attachment": false,
+        "reasoning": true,
+        "tool_call": true,
+        "release_date": "2026-03-11",
+        "last_updated": "2026-03-12",
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 262144,
+          "output": 65536
         }
       },
       "mistral-large-3:675b": {
@@ -3770,15 +3842,15 @@
           "output": 65536
         }
       },
-      "nemotron-3-super": {
-        "id": "nemotron-3-super",
-        "name": "nemotron-3-super",
-        "family": "nemotron",
+      "qwen3-coder-next": {
+        "id": "qwen3-coder-next",
+        "name": "qwen3-coder-next",
+        "family": "qwen",
         "attachment": false,
-        "reasoning": true,
+        "reasoning": false,
         "tool_call": true,
-        "release_date": "2026-03-11",
-        "last_updated": "2026-03-12",
+        "release_date": "2026-02-02",
+        "last_updated": "2026-02-08",
         "modalities": {
           "input": [
             "text"

@@ -27,6 +27,16 @@ export const SUPPORTED_MODELS = [
     value: 'ollama-cloud/gemini-3-pro-preview',
   },
   {
+    name: 'Ollama Cloud • Gemma 4 31B Cloud',
+    shortName: 'Gemma 4 31B',
+    value: 'ollama-cloud/gemma4:31b-cloud',
+  },
+  {
+    name: 'Ollama Cloud • Gemma 4 31B',
+    shortName: 'Gemma 4 31B',
+    value: 'ollama-cloud/gemma4:31b',
+  },
+  {
     name: 'Ollama Cloud • GLM 5',
     shortName: 'GLM 5',
     value: 'ollama-cloud/glm-5',
@@ -75,6 +85,11 @@ export const SUPPORTED_MODELS = [
     name: 'Ollama Cloud • Qwen3 Coder 480B',
     shortName: 'Qwen3 Coder 480B',
     value: 'ollama-cloud/qwen3-coder:480b',
+  },
+  {
+    name: 'Ollama Cloud • Qwen 3 Coder Next',
+    shortName: 'Qwen 3 Coder Next',
+    value: 'ollama-cloud/qwen3-coder-next',
   },
   {
     name: 'Ollama Cloud • Nemotron 3 Super',
