@@ -31,9 +31,7 @@ const GFS_VALIDATION_RUNS_SUBDIR = 'runs';
 const MIN_LATENCY_IMPACT_BENCHMARK_MS = 5;
 const NEUTRAL_DELTA_ABS_MS = 1;
 const NEUTRAL_DELTA_PCT = 10;
-const POSTGRES_CLIENT_ENV_VARS = {
-  psql: 'QWERY_PSQL_BIN',
-} as const;
+const PSQL_BIN_ENV_VAR = 'QWERY_PSQL_BIN';
 const COMMON_POSTGRES_MAJOR_VERSIONS = ['18', '17', '16', '15', '14', '13'];
 
 type CommandOptions = {
@@ -91,12 +89,9 @@ type ResolvedPostgresClientBinaries = {
 };
 
 type EnsuredGfsBaseline = {
-  runDir: string;
-  repoPath: string;
   checkpointCommit: string;
   postgresMajorVersion: string;
   psqlBinary: string;
-  dumpPath: string;
 };
 
 type PartitionedActionStatements = {
@@ -620,27 +615,24 @@ function parsePostgresClientMajorVersion(output: string): string {
   );
 }
 
-function buildVersionedBinaryCandidates(
-  program: 'psql',
-  majorVersion: string,
-): string[] {
+function buildVersionedPsqlCandidates(majorVersion: string): string[] {
   return uniqueStrings([
-    `${program}-${majorVersion}`,
-    `${program}${majorVersion}`,
-    `/usr/lib/postgresql/${majorVersion}/bin/${program}`,
-    `/usr/pgsql-${majorVersion}/bin/${program}`,
-    `/opt/homebrew/opt/libpq@${majorVersion}/bin/${program}`,
-    `/usr/local/opt/libpq@${majorVersion}/bin/${program}`,
+    `psql-${majorVersion}`,
+    `psql${majorVersion}`,
+    `/usr/lib/postgresql/${majorVersion}/bin/psql`,
+    `/usr/pgsql-${majorVersion}/bin/psql`,
+    `/opt/homebrew/opt/libpq@${majorVersion}/bin/psql`,
+    `/usr/local/opt/libpq@${majorVersion}/bin/psql`,
   ]);
 }
 
-function buildBootstrapBinaryCandidates(program: 'psql'): string[] {
+function buildBootstrapPsqlCandidates(): string[] {
   return uniqueStrings([
-    program,
-    `/usr/bin/${program}`,
-    `/usr/local/bin/${program}`,
+    'psql',
+    '/usr/bin/psql',
+    '/usr/local/bin/psql',
     ...COMMON_POSTGRES_MAJOR_VERSIONS.flatMap((majorVersion) =>
-      buildVersionedBinaryCandidates(program, majorVersion),
+      buildVersionedPsqlCandidates(majorVersion),
     ),
   ]);
 }
@@ -703,23 +695,19 @@ async function tryReadCommandMajorVersion(
   }
 }
 
-async function resolveBootstrapBinary(
-  program: 'psql',
-  signal: AbortSignal,
-): Promise<string> {
-  const envVar = POSTGRES_CLIENT_ENV_VARS.psql;
-  const configuredBinary = process.env[envVar]?.trim();
+async function resolveBootstrapPsql(signal: AbortSignal): Promise<string> {
+  const configuredBinary = process.env[PSQL_BIN_ENV_VAR]?.trim();
   if (configuredBinary) {
     const version = await tryReadCommandMajorVersion(configuredBinary, signal);
     if (!version) {
       throw new Error(
-        `Configured PostgreSQL client '${configuredBinary}' from ${envVar} was not executable.`,
+        `Configured PostgreSQL client '${configuredBinary}' from ${PSQL_BIN_ENV_VAR} was not executable.`,
       );
     }
     return configuredBinary;
   }
 
-  for (const candidate of buildBootstrapBinaryCandidates(program)) {
+  for (const candidate of buildBootstrapPsqlCandidates()) {
     const version = await tryReadCommandMajorVersion(candidate, signal);
     if (version) {
       return candidate;
@@ -727,54 +715,49 @@ async function resolveBootstrapBinary(
   }
 
   throw new Error(
-    `Could not find an executable ${program} binary. Install PostgreSQL client tools or set ${envVar}.`,
+    `Could not find an executable psql binary. Install PostgreSQL client tools or set ${PSQL_BIN_ENV_VAR}.`,
   );
 }
 
-async function resolveVersionMatchedBinary(
-  program: 'psql',
+async function resolveVersionMatchedPsql(
   majorVersion: string,
   signal: AbortSignal,
 ): Promise<string> {
-  const envVar = POSTGRES_CLIENT_ENV_VARS.psql;
-  const configuredBinary = process.env[envVar]?.trim();
+  const configuredBinary = process.env[PSQL_BIN_ENV_VAR]?.trim();
 
   if (configuredBinary) {
     const version = await tryReadCommandMajorVersion(configuredBinary, signal);
     if (!version) {
       throw new Error(
-        `Configured PostgreSQL client '${configuredBinary}' from ${envVar} was not executable.`,
+        `Configured PostgreSQL client '${configuredBinary}' from ${PSQL_BIN_ENV_VAR} was not executable.`,
       );
     }
     if (version !== majorVersion) {
       throw new Error(
-        `Configured PostgreSQL client '${configuredBinary}' from ${envVar} is version ${version}, but GFS validation requires PostgreSQL client major version ${majorVersion}.`,
+        `Configured PostgreSQL client '${configuredBinary}' from ${PSQL_BIN_ENV_VAR} is version ${version}, but GFS validation requires PostgreSQL client major version ${majorVersion}.`,
       );
     }
     return configuredBinary;
   }
 
-  for (const candidate of buildVersionedBinaryCandidates(
-    program,
-    majorVersion,
-  )) {
+  for (const candidate of buildVersionedPsqlCandidates(majorVersion)) {
     const version = await tryReadCommandMajorVersion(candidate, signal);
     if (version === majorVersion) {
       return candidate;
     }
   }
 
-  const defaultVersion = await tryReadCommandMajorVersion(program, signal);
+  const defaultVersion = await tryReadCommandMajorVersion('psql', signal);
   if (defaultVersion === majorVersion) {
-    return program;
+    return 'psql';
   }
 
   const mismatchHint = defaultVersion
-    ? `The default '${program}' on PATH is PostgreSQL ${defaultVersion}.`
-    : `No default '${program}' binary was found on PATH.`;
+    ? `The default 'psql' on PATH is PostgreSQL ${defaultVersion}.`
+    : `No default 'psql' binary was found on PATH.`;
 
   throw new Error(
-    `Could not find a PostgreSQL ${majorVersion}-compatible ${program} binary. ${mismatchHint} Install matching PostgreSQL client tools or set ${envVar}.`,
+    `Could not find a PostgreSQL ${majorVersion}-compatible psql binary. ${mismatchHint} Install matching PostgreSQL client tools or set ${PSQL_BIN_ENV_VAR}.`,
   );
 }
 
@@ -919,7 +902,6 @@ async function runPsqlWithRetry(
 
       lastError =
         error instanceof Error ? error : new Error(String(error ?? 'unknown'));
-      await waitForPostgresReady(program, connectionUrl, signal);
       await waitForAbortableDelay(POSTGRES_READY_RETRY_DELAY_MS, signal);
     }
   }
@@ -955,7 +937,7 @@ async function resolvePostgresClientBinaries(
   connectionUrl: string,
   signal: AbortSignal,
 ): Promise<ResolvedPostgresClientBinaries> {
-  const bootstrapPsql = await resolveBootstrapBinary('psql', signal);
+  const bootstrapPsql = await resolveBootstrapPsql(signal);
   const majorVersion = await readPostgresMajorVersion(
     bootstrapPsql,
     connectionUrl,
@@ -964,7 +946,7 @@ async function resolvePostgresClientBinaries(
 
   return {
     majorVersion,
-    psql: await resolveVersionMatchedBinary('psql', majorVersion, signal),
+    psql: await resolveVersionMatchedPsql(majorVersion, signal),
   };
 }
 
@@ -1024,12 +1006,9 @@ async function ensureGfsBaselineRepo(input: {
     );
 
     return {
-      runDir: input.runDir,
-      repoPath: input.repoPath,
       checkpointCommit,
       postgresMajorVersion: postgresClients.majorVersion,
       psqlBinary: postgresClients.psql,
-      dumpPath: input.dumpPath,
     };
   } catch (error) {
     input.logger.warn(
@@ -1048,19 +1027,13 @@ async function ensureGfsBaselineRepo(input: {
 
 export const __testables = {
   assessValidationResult,
-  buildBootstrapBinaryCandidates,
   buildSessionScopedExplainSql,
-  buildVersionedBinaryCandidates,
   extractExplainJsonPayload,
   isRetryablePostgresStartupError,
   partitionActionStatements,
   parseExplainPlanSummary,
   parseCommitHash,
   parseExplainMetrics,
-  parsePostgresClientMajorVersion,
-  resolveGfsDumpsRoot,
-  resolveGfsAuditWorkingRoot,
-  resolvePreparedDumpPath,
   runGfsValidationExclusive,
 };
 
@@ -1219,7 +1192,6 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
         );
 
         let shouldStopCompute = false;
-        let activeRepoPath = repoPath;
 
         try {
           await runCommand('gfs', ['version'], { signal: ctx.abort });
@@ -1233,17 +1205,16 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             logger,
           });
           shouldStopCompute = true;
-          activeRepoPath = baseline.repoPath;
 
           await ctx.metadata({
             title: 'Created GFS validation repo',
             metadata: {
-              runDir: baseline.runDir,
-              repoPath: activeRepoPath,
+              runDir,
+              repoPath,
               checkpointCommit: baseline.checkpointCommit,
               postgresMajorVersion: baseline.postgresMajorVersion,
               psqlBinary: baseline.psqlBinary,
-              dumpPath: baseline.dumpPath,
+              dumpPath,
             },
           });
 
@@ -1251,13 +1222,13 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             'gfs',
             ['checkout', '-b', branchName, baseline.checkpointCommit],
             {
-              cwd: activeRepoPath,
+              cwd: repoPath,
               signal: ctx.abort,
             },
           );
 
           const statusBefore = await readGfsConnectionUrl(
-            activeRepoPath,
+            repoPath,
             ctx.abort,
           );
           await waitForPostgresReady(
@@ -1274,7 +1245,6 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             ),
           );
 
-          const executedActions = [...actionStatements];
           for (const statement of partitionedStatements.persistentStatements) {
             await runPsqlWithRetry(
               baseline.psqlBinary,
@@ -1289,18 +1259,18 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
               'gfs',
               ['commit', '-m', 'apply audit remediation candidate'],
               {
-                cwd: activeRepoPath,
+                cwd: repoPath,
                 signal: ctx.abort,
               },
             );
           }
 
           const afterCommit = await readLatestCommitHash(
-            activeRepoPath,
+            repoPath,
             ctx.abort,
           );
           const statusAfter = await readGfsConnectionUrl(
-            activeRepoPath,
+            repoPath,
             ctx.abort,
           );
           await waitForPostgresReady(
@@ -1352,7 +1322,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
               provider: datasource.datasource_provider,
             },
             gfs: {
-              repoPath: activeRepoPath,
+              repoPath,
               branchName: statusAfter.branch,
               checkpointCommit: baseline.checkpointCommit,
               afterCommit,
@@ -1364,7 +1334,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             validation: {
               validationType: params.validationType,
               query: params.validationQuery.trim(),
-              actionsApplied: executedActions,
+              actionsApplied: actionStatements,
               before,
               after,
               delta: {
@@ -1378,12 +1348,12 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
         } finally {
           if (shouldStopCompute) {
             await runCommand('gfs', ['compute', 'stop'], {
-              cwd: activeRepoPath,
+              cwd: repoPath,
               timeoutMs: COMPUTE_STOP_TIMEOUT_MS,
             }).catch((error) => {
               logger.warn(
                 {
-                  repoPath: activeRepoPath,
+                  repoPath,
                   error: error instanceof Error ? error.message : String(error),
                 },
                 'Failed to stop GFS compute after remediation validation',

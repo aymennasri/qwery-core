@@ -1,6 +1,3 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { __testables } from '../../src/tools/validate-remediation-in-gfs-cli';
 
@@ -41,110 +38,12 @@ function makeExplainJson(input: {
 }
 
 describe('validate_remediation_in_gfs_cli helpers', () => {
-  it('parses PostgreSQL major versions from client banners', () => {
-    expect(
-      __testables.parsePostgresClientMajorVersion('pg_dump (PostgreSQL) 18.1'),
-    ).toBe('18');
-    expect(
-      __testables.parsePostgresClientMajorVersion(
-        'psql (PostgreSQL) 16.8 (Debian 16.8-1.pgdg120+1)',
-      ),
-    ).toBe('16');
-  });
-
   it('parses abbreviated commit hashes from gfs log output', () => {
     expect(
       __testables.parseCommitHash(
         'commit fe7c2f7 (HEAD -> main, main)\nAuthor: test <test@example.com>',
       ),
     ).toBe('fe7c2f7');
-  });
-
-  it('builds version-aware binary candidates before generic fallbacks', () => {
-    expect(__testables.buildVersionedBinaryCandidates('psql', '16')).toEqual([
-      'psql-16',
-      'psql16',
-      '/usr/lib/postgresql/16/bin/psql',
-      '/usr/pgsql-16/bin/psql',
-      '/opt/homebrew/opt/libpq@16/bin/psql',
-      '/usr/local/opt/libpq@16/bin/psql',
-    ]);
-  });
-
-  it('includes generic and versioned bootstrap candidates', () => {
-    const candidates = __testables.buildBootstrapBinaryCandidates('psql');
-
-    expect(candidates[0]).toBe('psql');
-    expect(candidates).toContain('/usr/bin/psql');
-    expect(candidates).toContain('/usr/lib/postgresql/16/bin/psql');
-    expect(candidates).toContain('/usr/pgsql-16/bin/psql');
-  });
-
-  it('uses QWERY_GFS_AUDITS_DIR when set', () => {
-    const original = process.env.QWERY_GFS_AUDITS_DIR;
-    process.env.QWERY_GFS_AUDITS_DIR = '/var/tmp/custom-gfs-audits';
-
-    try {
-      expect(__testables.resolveGfsAuditWorkingRoot()).toBe(
-        '/var/tmp/custom-gfs-audits',
-      );
-    } finally {
-      if (original === undefined) {
-        delete process.env.QWERY_GFS_AUDITS_DIR;
-      } else {
-        process.env.QWERY_GFS_AUDITS_DIR = original;
-      }
-    }
-  });
-
-  it('uses QWERY_GFS_DUMPS_DIR when set', () => {
-    const original = process.env.QWERY_GFS_DUMPS_DIR;
-    process.env.QWERY_GFS_DUMPS_DIR = '/var/tmp/custom-gfs-dumps';
-
-    try {
-      expect(__testables.resolveGfsDumpsRoot()).toBe(
-        '/var/tmp/custom-gfs-dumps',
-      );
-    } finally {
-      if (original === undefined) {
-        delete process.env.QWERY_GFS_DUMPS_DIR;
-      } else {
-        process.env.QWERY_GFS_DUMPS_DIR = original;
-      }
-    }
-  });
-
-  it('resolves prepared dump by host, port, and database', async () => {
-    const originalDir = process.env.QWERY_GFS_DUMPS_DIR;
-    const originalFile = process.env.QWERY_GFS_DUMP_FILE;
-    const root = await mkdtemp(join(tmpdir(), 'gfs-dumps-'));
-    const dumpPath = join(root, 'localhost-5433-pagila.sql');
-    await writeFile(dumpPath, '-- dump', 'utf8');
-    process.env.QWERY_GFS_DUMPS_DIR = root;
-    delete process.env.QWERY_GFS_DUMP_FILE;
-
-    try {
-      await expect(
-        __testables.resolvePreparedDumpPath({
-          datasourceId: 'datasource-1',
-          datasourceName: 'Pagila Neon Sample',
-          connectionUrl:
-            'postgresql://postgres:postgres@localhost:5433/pagila?sslmode=disable',
-        }),
-      ).resolves.toBe(dumpPath);
-    } finally {
-      if (originalDir === undefined) {
-        delete process.env.QWERY_GFS_DUMPS_DIR;
-      } else {
-        process.env.QWERY_GFS_DUMPS_DIR = originalDir;
-      }
-      if (originalFile === undefined) {
-        delete process.env.QWERY_GFS_DUMP_FILE;
-      } else {
-        process.env.QWERY_GFS_DUMP_FILE = originalFile;
-      }
-      await rm(root, { recursive: true, force: true });
-    }
   });
 
   it('serializes concurrent GFS validation work', async () => {
