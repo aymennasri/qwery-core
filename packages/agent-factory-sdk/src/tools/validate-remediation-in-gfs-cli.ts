@@ -1227,10 +1227,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             },
           );
 
-          const statusBefore = await readGfsConnectionUrl(
-            repoPath,
-            ctx.abort,
-          );
+          const statusBefore = await readGfsConnectionUrl(repoPath, ctx.abort);
           await waitForPostgresReady(
             baseline.psqlBinary,
             statusBefore.connectionUrl,
@@ -1265,14 +1262,8 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             );
           }
 
-          const afterCommit = await readLatestCommitHash(
-            repoPath,
-            ctx.abort,
-          );
-          const statusAfter = await readGfsConnectionUrl(
-            repoPath,
-            ctx.abort,
-          );
+          const afterCommit = await readLatestCommitHash(repoPath, ctx.abort);
+          const statusAfter = await readGfsConnectionUrl(repoPath, ctx.abort);
           await waitForPostgresReady(
             baseline.psqlBinary,
             statusAfter.connectionUrl,
