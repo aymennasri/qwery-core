@@ -86,7 +86,6 @@ function registerTools() {
   tools.set(TodoWriteTool.id, TodoWriteTool as unknown as ToolInfo);
   tools.set(TodoReadTool.id, TodoReadTool as unknown as ToolInfo);
   tools.set(WebFetchTool.id, WebFetchTool as unknown as ToolInfo);
-  //tools.set(TestConnectionTool.id, TestConnectionTool as unknown as ToolInfo);
   tools.set(GetSchemaTool.id, GetSchemaTool as unknown as ToolInfo);
   tools.set(RunQueryTool.id, RunQueryTool as unknown as ToolInfo);
   tools.set(RunQueriesTool.id, RunQueriesTool as unknown as ToolInfo);
