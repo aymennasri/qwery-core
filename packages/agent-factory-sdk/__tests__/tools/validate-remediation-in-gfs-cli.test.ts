@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -23,9 +23,7 @@ function makeExplainJson(input: {
         'Node Type': input.nodeType,
         ...(input.relationName ? { 'Relation Name': input.relationName } : {}),
         ...(input.indexName ? { 'Index Name': input.indexName } : {}),
-        ...(input.planRows !== undefined
-          ? { 'Plan Rows': input.planRows }
-          : {}),
+        ...(input.planRows !== undefined ? { 'Plan Rows': input.planRows } : {}),
         ...(input.actualRows !== undefined
           ? { 'Actual Rows': input.actualRows }
           : {}),
@@ -58,107 +56,6 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
         'commit fe7c2f7 (HEAD -> main, main)\nAuthor: test <test@example.com>',
       ),
     ).toBe('fe7c2f7');
-  });
-
-  it('parses full commit hashes from gfs JSON log output', () => {
-    expect(
-      __testables.parseLatestCommitHashFromGfsLogJson(
-        JSON.stringify({
-          commits: [
-            {
-              hash: 'fe7c2f7',
-              hash_full:
-                'fe7c2f7c91cf184bf8f9f9085b26d7f4af2c2cc0b8de6c4be7db69ea11223344',
-            },
-          ],
-        }),
-      ),
-    ).toBe('fe7c2f7c91cf184bf8f9f9085b26d7f4af2c2cc0b8de6c4be7db69ea11223344');
-  });
-
-  it('detects branch-already-exists errors from the gfs CLI', () => {
-    expect(
-      __testables.isExistingBranchError(
-        new Error("gfs command failed: branch 'audit-branch' already exists"),
-      ),
-    ).toBe(true);
-    expect(
-      __testables.isExistingBranchError(
-        new Error('gfs command failed: failed to connect to Docker daemon'),
-      ),
-    ).toBe(false);
-  });
-
-  it('detects unsupported gfs cli arguments', () => {
-    expect(
-      __testables.isUnexpectedGfsArgumentError(
-        new Error(
-          "gfs command failed: error: error: unexpected argument '--json' found\n\nUsage: gfs [OPTIONS] <COMMAND>",
-        ),
-        '--json',
-      ),
-    ).toBe(true);
-    expect(
-      __testables.isUnexpectedGfsArgumentError(
-        new Error(
-          "gfs command failed: error: error: unexpected argument '--json' found\n\nUsage: gfs [OPTIONS] <COMMAND>",
-        ),
-        '--verbose',
-      ),
-    ).toBe(false);
-  });
-
-  it('detects workspace permission failures from gfs commit output', () => {
-    expect(
-      __testables.isGfsWorkspacePermissionError(
-        new Error(
-          "gfs command failed: error: storage error: internal error: copy '/tmp/repo/.gfs/workspaces/audit-branch/0/data' -> '/tmp/repo/.gfs/snapshots/ab/cdef' failed: cp: cannot access '/tmp/repo/.gfs/workspaces/audit-branch/0/data': Permission denied",
-        ),
-      ),
-    ).toBe(true);
-    expect(
-      __testables.isGfsWorkspacePermissionError(
-        new Error('gfs command failed: failed to connect to Docker daemon'),
-      ),
-    ).toBe(false);
-  });
-
-  it('extracts the unreadable workspace path from gfs errors', () => {
-    expect(
-      __testables.extractGfsWorkspacePathFromError(
-        new Error(
-          "gfs command failed: error: storage error: internal error: copy '/tmp/repo/.gfs/workspaces/audit-branch/0/data' -> '/tmp/repo/.gfs/snapshots/ab/cdef' failed: cp: cannot access '/tmp/repo/.gfs/workspaces/audit-branch/0/data': Permission denied",
-        ),
-      ),
-    ).toBe('/tmp/repo/.gfs/workspaces/audit-branch/0/data');
-  });
-
-  it('treats read-only cleanup failures as privileged filesystem errors', () => {
-    expect(
-      __testables.isPermissionDeniedError(
-        Object.assign(new Error('read-only file system'), { code: 'EROFS' }),
-      ),
-    ).toBe(true);
-    expect(
-      __testables.isPermissionDeniedError(
-        Object.assign(new Error('busy mount'), { code: 'EBUSY' }),
-      ),
-    ).toBe(true);
-  });
-
-  it('detects unsupported podman unshare cleanup on remote clients', () => {
-    expect(
-      __testables.isRemotePodmanUnshareUnsupportedError(
-        new Error(
-          'podman command failed: Error: cannot use command "podman unshare" with the remote podman client',
-        ),
-      ),
-    ).toBe(true);
-    expect(
-      __testables.isRemotePodmanUnshareUnsupportedError(
-        new Error('podman command failed: permission denied'),
-      ),
-    ).toBe(false);
   });
 
   it('builds version-aware binary candidates before generic fallbacks', () => {
@@ -203,23 +100,27 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
   it('builds a stable baseline cache key', () => {
     expect(
       __testables.buildBaselineCacheKey({
+        conversationId: 'conversation-a',
         datasourceId: 'datasource-1',
         connectionUrl: 'postgres://user:pass@db.example.com:5432/app',
       }),
     ).toBe(
       __testables.buildBaselineCacheKey({
+        conversationId: 'conversation-a',
         datasourceId: 'datasource-1',
         connectionUrl: 'postgres://user:pass@db.example.com:5432/app',
       }),
     );
     expect(
       __testables.buildBaselineCacheKey({
+        conversationId: 'conversation-a',
         datasourceId: 'datasource-1',
         connectionUrl: 'postgres://user:pass@db.example.com:5432/app',
       }),
     ).not.toBe(
       __testables.buildBaselineCacheKey({
-        datasourceId: 'datasource-2',
+        conversationId: 'conversation-b',
+        datasourceId: 'datasource-1',
         connectionUrl: 'postgres://user:pass@db.example.com:5432/app',
       }),
     );
@@ -264,35 +165,11 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
         ),
       ),
     ).toBe(true);
-    expect(
-      __testables.isRetryablePostgresStartupError(
-        new Error(
-          'psql command failed: psql: error: connection to server at "localhost" (::1), port 32808 failed: FATAL:  the database system is not yet accepting connections\nDETAIL:  Consistent recovery state has not been yet reached.',
-        ),
-      ),
-    ).toBe(true);
   });
 
   it('does not hide non-startup psql failures as retryable', () => {
     expect(
       __testables.isRetryablePostgresStartupError(
-        new Error(
-          'psql command failed: psql: error: relation "missing_table" does not exist',
-        ),
-      ),
-    ).toBe(false);
-  });
-
-  it('detects opaque psql readiness probe wrapper failures', () => {
-    expect(
-      __testables.isOpaquePsqlReadinessProbeError(
-        new Error(
-          'psql command failed: Command failed: psql --no-psqlrc --set ON_ERROR_STOP=1 --tuples-only --no-align -c SELECT 1',
-        ),
-      ),
-    ).toBe(true);
-    expect(
-      __testables.isOpaquePsqlReadinessProbeError(
         new Error(
           'psql command failed: psql: error: relation "missing_table" does not exist',
         ),
@@ -337,8 +214,7 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
   });
 
   it('extracts EXPLAIN JSON from session-scoped psql output', () => {
-    const json =
-      '[{"Plan":{"Node Type":"Aggregate"},"Planning Time":0.1,"Execution Time":1.2}]';
+    const json = '[{"Plan":{"Node Type":"Aggregate"},"Planning Time":0.1,"Execution Time":1.2}]';
 
     expect(
       __testables.extractExplainJsonPayload(
@@ -386,86 +262,6 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
     releaseLock?.();
     await expect(first).resolves.toBe('done');
     await rm(root, { recursive: true, force: true });
-  });
-
-  it('detects expired cached baselines by metadata age', () => {
-    const nowMs = Date.parse('2026-04-17T00:00:00.000Z');
-
-    expect(
-      __testables.shouldDeleteExpiredBaselineCache({
-        metadata: {
-          state: 'ready',
-          checkpointCommit: 'abc1234',
-          postgresMajorVersion: '16',
-          createdAt: '2026-04-08T00:00:00.000Z',
-          updatedAt: '2026-04-08T00:00:00.000Z',
-        },
-        cacheMtimeMs: nowMs,
-        nowMs,
-      }),
-    ).toBe(true);
-
-    expect(
-      __testables.shouldDeleteExpiredBaselineCache({
-        metadata: {
-          state: 'ready',
-          checkpointCommit: 'abc1234',
-          postgresMajorVersion: '16',
-          createdAt: '2026-04-15T00:00:00.000Z',
-          updatedAt: '2026-04-15T00:00:00.000Z',
-        },
-        cacheMtimeMs: nowMs,
-        nowMs,
-      }),
-    ).toBe(false);
-  });
-
-  it('cleans expired unlocked baseline caches only', async () => {
-    const baselineRoot = await mkdtemp(join(tmpdir(), 'gfs-baselines-'));
-    const oldCache = join(baselineRoot, 'old-cache');
-    const lockedCache = join(baselineRoot, 'locked-cache');
-    const activeCache = join(baselineRoot, 'active-cache');
-    const recentCache = join(baselineRoot, 'recent-cache');
-    const oldLockDir = join(baselineRoot, 'locked-cache.lock');
-    const nowMs = Date.parse('2026-04-17T00:00:00.000Z');
-
-    const writeMetadata = async (cacheDir: string, createdAt: string) => {
-      await mkdir(cacheDir, { recursive: true });
-      await writeFile(
-        join(cacheDir, 'baseline.json'),
-        JSON.stringify(
-          {
-            state: 'ready',
-            checkpointCommit: 'abc1234',
-            postgresMajorVersion: '16',
-            createdAt,
-            updatedAt: createdAt,
-          },
-          null,
-          2,
-        ),
-        'utf8',
-      );
-    };
-
-    await writeMetadata(oldCache, '2026-04-01T00:00:00.000Z');
-    await writeMetadata(lockedCache, '2026-04-01T00:00:00.000Z');
-    await writeMetadata(activeCache, '2026-04-01T00:00:00.000Z');
-    await writeMetadata(recentCache, '2026-04-16T00:00:00.000Z');
-    await mkdir(oldLockDir, { recursive: true });
-
-    await __testables.cleanupExpiredBaselineCaches({
-      baselineRoot,
-      activeCacheKey: 'active-cache',
-      nowMs,
-    });
-
-    await expect(stat(oldCache)).rejects.toThrow();
-    await expect(stat(lockedCache)).resolves.toBeTruthy();
-    await expect(stat(activeCache)).resolves.toBeTruthy();
-    await expect(stat(recentCache)).resolves.toBeTruthy();
-
-    await rm(baselineRoot, { recursive: true, force: true });
   });
 
   it('parses root plan details from EXPLAIN JSON output', () => {
@@ -528,9 +324,7 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
       ),
     };
 
-    expect(
-      __testables.assessValidationResult(before, after, 'latency', []),
-    ).toMatchObject({
+    expect(__testables.assessValidationResult(before, after)).toMatchObject({
       timingOutcome: 'regressed',
       recommendationStatus: 'rejected',
       benchmarkSuitability: 'latency-impact',
@@ -571,132 +365,10 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
       ),
     };
 
-    expect(
-      __testables.assessValidationResult(before, after, 'latency', []),
-    ).toMatchObject({
+    expect(__testables.assessValidationResult(before, after)).toMatchObject({
       timingOutcome: 'improved',
       recommendationStatus: 'validated',
       benchmarkSuitability: 'low-latency',
     });
-  });
-
-  it('treats meaningful config timing wins as latency-impact validations', () => {
-    const before = {
-      ...__testables.parseExplainMetrics(
-        makeExplainJson({
-          planningTimeMs: 3,
-          executionTimeMs: 5000,
-          nodeType: 'Aggregate',
-          sharedHitBlocks: 0,
-          sharedReadBlocks: 100496,
-        }),
-      ),
-      plan: __testables.parseExplainPlanSummary(
-        makeExplainJson({
-          planningTimeMs: 3,
-          executionTimeMs: 5000,
-          nodeType: 'Aggregate',
-          sharedHitBlocks: 0,
-          sharedReadBlocks: 100496,
-        }),
-      ),
-    };
-    const after = {
-      ...__testables.parseExplainMetrics(
-        makeExplainJson({
-          planningTimeMs: 1,
-          executionTimeMs: 1400,
-          nodeType: 'Aggregate',
-          sharedHitBlocks: 64,
-          sharedReadBlocks: 100464,
-        }),
-      ),
-      plan: __testables.parseExplainPlanSummary(
-        makeExplainJson({
-          planningTimeMs: 1,
-          executionTimeMs: 1400,
-          nodeType: 'Aggregate',
-          sharedHitBlocks: 64,
-          sharedReadBlocks: 100464,
-        }),
-      ),
-    };
-
-    expect(
-      __testables.assessValidationResult(before, after, 'config', [
-        'SET LOCAL max_parallel_workers_per_gather = 4',
-      ]),
-    ).toMatchObject({
-      timingOutcome: 'improved',
-      recommendationStatus: 'validated',
-      benchmarkSuitability: 'latency-impact',
-    });
-  });
-
-  it('keeps fast config experiments in the low-latency bucket', () => {
-    const before = {
-      ...__testables.parseExplainMetrics(
-        makeExplainJson({
-          planningTimeMs: 2.2,
-          executionTimeMs: 1.1,
-          nodeType: 'Limit',
-          sharedHitBlocks: 0,
-          sharedReadBlocks: 10,
-        }),
-      ),
-      plan: __testables.parseExplainPlanSummary(
-        makeExplainJson({
-          planningTimeMs: 2.2,
-          executionTimeMs: 1.1,
-          nodeType: 'Limit',
-          sharedHitBlocks: 0,
-          sharedReadBlocks: 10,
-        }),
-      ),
-    };
-    const after = {
-      ...__testables.parseExplainMetrics(
-        makeExplainJson({
-          planningTimeMs: 0.5,
-          executionTimeMs: 0.4,
-          nodeType: 'Limit',
-          sharedHitBlocks: 10,
-          sharedReadBlocks: 0,
-        }),
-      ),
-      plan: __testables.parseExplainPlanSummary(
-        makeExplainJson({
-          planningTimeMs: 0.5,
-          executionTimeMs: 0.4,
-          nodeType: 'Limit',
-          sharedHitBlocks: 10,
-          sharedReadBlocks: 0,
-        }),
-      ),
-    };
-
-    expect(
-      __testables.assessValidationResult(before, after, 'config', [
-        'SET LOCAL random_page_cost = 1.1',
-      ]),
-    ).toMatchObject({
-      timingOutcome: 'improved',
-      recommendationStatus: 'validated',
-      benchmarkSuitability: 'low-latency',
-    });
-  });
-
-  it('detects DDL-like statements for commit blocker handling', () => {
-    expect(
-      __testables.isDdlLikeStatement(
-        'CREATE INDEX idx_products_category ON products(category)',
-      ),
-    ).toBe(true);
-    expect(
-      __testables.isDdlLikeStatement(
-        'ALTER TABLE products ADD COLUMN sku text',
-      ),
-    ).toBe(true);
-    expect(__testables.isDdlLikeStatement('ANALYZE products')).toBe(false);
   });
 });

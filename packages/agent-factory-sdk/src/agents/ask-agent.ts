@@ -19,6 +19,7 @@ export const AskAgent = Agent.define('ask', {
       'get_statistics_health',
       'get_bloat_estimates',
       'get_replication_health',
+      'validate_remediation_in_gfs',
       'validate_remediation_in_gfs_cli',
     ],
   },
