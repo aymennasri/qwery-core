@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -23,7 +23,9 @@ function makeExplainJson(input: {
         'Node Type': input.nodeType,
         ...(input.relationName ? { 'Relation Name': input.relationName } : {}),
         ...(input.indexName ? { 'Index Name': input.indexName } : {}),
-        ...(input.planRows !== undefined ? { 'Plan Rows': input.planRows } : {}),
+        ...(input.planRows !== undefined
+          ? { 'Plan Rows': input.planRows }
+          : {}),
         ...(input.actualRows !== undefined
           ? { 'Actual Rows': input.actualRows }
           : {}),
@@ -59,16 +61,14 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
   });
 
   it('builds version-aware binary candidates before generic fallbacks', () => {
-    expect(__testables.buildVersionedBinaryCandidates('pg_dump', '16')).toEqual(
-      [
-        'pg_dump-16',
-        'pg_dump16',
-        '/usr/lib/postgresql/16/bin/pg_dump',
-        '/usr/pgsql-16/bin/pg_dump',
-        '/opt/homebrew/opt/libpq@16/bin/pg_dump',
-        '/usr/local/opt/libpq@16/bin/pg_dump',
-      ],
-    );
+    expect(__testables.buildVersionedBinaryCandidates('psql', '16')).toEqual([
+      'psql-16',
+      'psql16',
+      '/usr/lib/postgresql/16/bin/psql',
+      '/usr/pgsql-16/bin/psql',
+      '/opt/homebrew/opt/libpq@16/bin/psql',
+      '/usr/local/opt/libpq@16/bin/psql',
+    ]);
   });
 
   it('includes generic and versioned bootstrap candidates', () => {
@@ -97,43 +97,89 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
     }
   });
 
-  it('builds a stable baseline cache key', () => {
-    expect(
-      __testables.buildBaselineCacheKey({
-        conversationId: 'conversation-a',
-        datasourceId: 'datasource-1',
-        connectionUrl: 'postgres://user:pass@db.example.com:5432/app',
-      }),
-    ).toBe(
-      __testables.buildBaselineCacheKey({
-        conversationId: 'conversation-a',
-        datasourceId: 'datasource-1',
-        connectionUrl: 'postgres://user:pass@db.example.com:5432/app',
-      }),
-    );
-    expect(
-      __testables.buildBaselineCacheKey({
-        conversationId: 'conversation-a',
-        datasourceId: 'datasource-1',
-        connectionUrl: 'postgres://user:pass@db.example.com:5432/app',
-      }),
-    ).not.toBe(
-      __testables.buildBaselineCacheKey({
-        conversationId: 'conversation-b',
-        datasourceId: 'datasource-1',
-        connectionUrl: 'postgres://user:pass@db.example.com:5432/app',
-      }),
-    );
+  it('uses QWERY_GFS_DUMPS_DIR when set', () => {
+    const original = process.env.QWERY_GFS_DUMPS_DIR;
+    process.env.QWERY_GFS_DUMPS_DIR = '/var/tmp/custom-gfs-dumps';
+
+    try {
+      expect(__testables.resolveGfsDumpsRoot()).toBe(
+        '/var/tmp/custom-gfs-dumps',
+      );
+    } finally {
+      if (original === undefined) {
+        delete process.env.QWERY_GFS_DUMPS_DIR;
+      } else {
+        process.env.QWERY_GFS_DUMPS_DIR = original;
+      }
+    }
   });
 
-  it('appends branch suffixes within the branch length limit', () => {
-    const branchName = __testables.buildBranchNameWithSuffix(
-      'audit-this-branch-name-is-intentionally-long-to-exercise-trimming',
-      '12345678',
-    );
+  it('resolves prepared dump by host, port, and database', async () => {
+    const originalDir = process.env.QWERY_GFS_DUMPS_DIR;
+    const originalFile = process.env.QWERY_GFS_DUMP_FILE;
+    const root = await mkdtemp(join(tmpdir(), 'gfs-dumps-'));
+    const dumpPath = join(root, 'localhost-5433-pagila.sql');
+    await writeFile(dumpPath, '-- dump', 'utf8');
+    process.env.QWERY_GFS_DUMPS_DIR = root;
+    delete process.env.QWERY_GFS_DUMP_FILE;
 
-    expect(branchName).toMatch(/-12345678$/);
-    expect(branchName.length).toBeLessThanOrEqual(63);
+    try {
+      await expect(
+        __testables.resolvePreparedDumpPath({
+          datasourceId: 'datasource-1',
+          datasourceName: 'Pagila Neon Sample',
+          connectionUrl:
+            'postgresql://postgres:postgres@localhost:5433/pagila?sslmode=disable',
+        }),
+      ).resolves.toBe(dumpPath);
+    } finally {
+      if (originalDir === undefined) {
+        delete process.env.QWERY_GFS_DUMPS_DIR;
+      } else {
+        process.env.QWERY_GFS_DUMPS_DIR = originalDir;
+      }
+      if (originalFile === undefined) {
+        delete process.env.QWERY_GFS_DUMP_FILE;
+      } else {
+        process.env.QWERY_GFS_DUMP_FILE = originalFile;
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('serializes concurrent GFS validation work', async () => {
+    const events: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    const firstCanFinish = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const first = __testables.runGfsValidationExclusive(async () => {
+      events.push('first-start');
+      await firstCanFinish;
+      events.push('first-end');
+      return 'first';
+    });
+    const second = __testables.runGfsValidationExclusive(async () => {
+      events.push('second-start');
+      events.push('second-end');
+      return 'second';
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(events).toEqual(['first-start']);
+
+    releaseFirst?.();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      'first',
+      'second',
+    ]);
+    expect(events).toEqual([
+      'first-start',
+      'first-end',
+      'second-start',
+      'second-end',
+    ]);
   });
 
   it('treats startup and connection-refused errors as retryable', () => {
@@ -214,54 +260,14 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
   });
 
   it('extracts EXPLAIN JSON from session-scoped psql output', () => {
-    const json = '[{"Plan":{"Node Type":"Aggregate"},"Planning Time":0.1,"Execution Time":1.2}]';
+    const json =
+      '[{"Plan":{"Node Type":"Aggregate"},"Planning Time":0.1,"Execution Time":1.2}]';
 
     expect(
       __testables.extractExplainJsonPayload(
         ['BEGIN', 'SET', json, 'RESET', 'COMMIT'].join('\n'),
       ),
     ).toBe(json);
-  });
-
-  it('fails fast when another validation already holds the baseline lock', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'gfs-lock-'));
-    const lockDir = join(root, 'baseline.lock');
-    const signal = new AbortController().signal;
-
-    let releaseLock: (() => void) | undefined;
-    const lockHeld = new Promise<void>((resolve) => {
-      releaseLock = resolve;
-    });
-
-    const first = __testables.withDirectoryLock(lockDir, signal, async () => {
-      await lockHeld;
-      return 'done';
-    });
-
-    for (let attempt = 0; attempt < 20; attempt++) {
-      try {
-        await stat(lockDir);
-        break;
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-    }
-
-    await expect(
-      __testables.withDirectoryLock(
-        lockDir,
-        signal,
-        async () => 'unreachable',
-        {
-          waitOnBusy: false,
-          busyMessage: 'busy lock',
-        },
-      ),
-    ).rejects.toThrow('busy lock');
-
-    releaseLock?.();
-    await expect(first).resolves.toBe('done');
-    await rm(root, { recursive: true, force: true });
   });
 
   it('parses root plan details from EXPLAIN JSON output', () => {
@@ -369,6 +375,143 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
       timingOutcome: 'improved',
       recommendationStatus: 'validated',
       benchmarkSuitability: 'low-latency',
+    });
+  });
+
+  it('does not validate config changes from timing-only noise', () => {
+    const before = {
+      ...__testables.parseExplainMetrics(
+        makeExplainJson({
+          planningTimeMs: 2,
+          executionTimeMs: 98,
+          nodeType: 'Seq Scan',
+          sharedReadBlocks: 100_000,
+        }),
+      ),
+      plan: __testables.parseExplainPlanSummary(
+        makeExplainJson({
+          planningTimeMs: 2,
+          executionTimeMs: 98,
+          nodeType: 'Seq Scan',
+          sharedReadBlocks: 100_000,
+        }),
+      ),
+    };
+    const after = {
+      ...__testables.parseExplainMetrics(
+        makeExplainJson({
+          planningTimeMs: 1,
+          executionTimeMs: 80,
+          nodeType: 'Seq Scan',
+          sharedReadBlocks: 99_950,
+        }),
+      ),
+      plan: __testables.parseExplainPlanSummary(
+        makeExplainJson({
+          planningTimeMs: 1,
+          executionTimeMs: 80,
+          nodeType: 'Seq Scan',
+          sharedReadBlocks: 99_950,
+        }),
+      ),
+    };
+
+    expect(
+      __testables.assessValidationResult(before, after, 'config'),
+    ).toMatchObject({
+      timingOutcome: 'improved',
+      recommendationStatus: 'inconclusive',
+      benchmarkSuitability: 'latency-impact',
+    });
+  });
+
+  it('validates config changes with material read-block improvement', () => {
+    const before = {
+      ...__testables.parseExplainMetrics(
+        makeExplainJson({
+          planningTimeMs: 2,
+          executionTimeMs: 98,
+          nodeType: 'Seq Scan',
+          sharedReadBlocks: 100_000,
+        }),
+      ),
+      plan: __testables.parseExplainPlanSummary(
+        makeExplainJson({
+          planningTimeMs: 2,
+          executionTimeMs: 98,
+          nodeType: 'Seq Scan',
+          sharedReadBlocks: 100_000,
+        }),
+      ),
+    };
+    const after = {
+      ...__testables.parseExplainMetrics(
+        makeExplainJson({
+          planningTimeMs: 1,
+          executionTimeMs: 80,
+          nodeType: 'Seq Scan',
+          sharedReadBlocks: 50_000,
+        }),
+      ),
+      plan: __testables.parseExplainPlanSummary(
+        makeExplainJson({
+          planningTimeMs: 1,
+          executionTimeMs: 80,
+          nodeType: 'Seq Scan',
+          sharedReadBlocks: 50_000,
+        }),
+      ),
+    };
+
+    expect(
+      __testables.assessValidationResult(before, after, 'config'),
+    ).toMatchObject({
+      timingOutcome: 'improved',
+      recommendationStatus: 'validated',
+      benchmarkSuitability: 'latency-impact',
+    });
+  });
+
+  it('validates maintenance changes that do not regress the benchmark', () => {
+    const before = {
+      ...__testables.parseExplainMetrics(
+        makeExplainJson({
+          planningTimeMs: 2,
+          executionTimeMs: 98,
+          nodeType: 'Seq Scan',
+        }),
+      ),
+      plan: __testables.parseExplainPlanSummary(
+        makeExplainJson({
+          planningTimeMs: 2,
+          executionTimeMs: 98,
+          nodeType: 'Seq Scan',
+        }),
+      ),
+    };
+    const after = {
+      ...__testables.parseExplainMetrics(
+        makeExplainJson({
+          planningTimeMs: 2,
+          executionTimeMs: 98,
+          nodeType: 'Seq Scan',
+        }),
+      ),
+      plan: __testables.parseExplainPlanSummary(
+        makeExplainJson({
+          planningTimeMs: 2,
+          executionTimeMs: 98,
+          nodeType: 'Seq Scan',
+        }),
+      ),
+    };
+
+    expect(
+      __testables.assessValidationResult(before, after, 'maintenance'),
+    ).toMatchObject({
+      timingOutcome: 'neutral',
+      recommendationStatus: 'validated',
+      benchmarkSuitability: 'latency-impact',
     });
   });
 });

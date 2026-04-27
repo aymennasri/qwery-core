@@ -8,6 +8,14 @@ This document records the intentionally injected issues in the local `pagila` Po
 - Engine: PostgreSQL 16
 - Database: `pagila`
 - Connection string: `postgresql://postgres:postgres@localhost:5433/pagila?sslmode=disable`
+- Prepared GFS import dump: `~/.cache/qwery/gfs-dumps/localhost-5433-pagila.sql`
+
+The DB audit GFS validator does not run `pg_dump` itself. It resolves a prepared SQL dump from `QWERY_GFS_DUMPS_DIR` or, by default, `~/.cache/qwery/gfs-dumps`. For local fixtures, name dumps as `<host>-<port>-<database>.sql` so the tool can find them from the datasource connection URL.
+
+```sh
+podman exec pagila-postgres pg_dump --format=plain --no-owner --no-privileges --dbname=pagila --username=postgres > ~/.cache/qwery/gfs-dumps/localhost-5433-pagila.sql
+podman exec test-postgres pg_dump --format=plain --no-owner --no-privileges --dbname=postgres --username=postgres > ~/.cache/qwery/gfs-dumps/localhost-5432-postgres.sql
+```
 
 ## Fixture Goal
 
