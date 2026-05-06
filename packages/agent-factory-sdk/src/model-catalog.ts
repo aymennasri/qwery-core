@@ -2,9 +2,9 @@ import type { ModelsDevCatalog } from '@qwery/shared/model-cost';
 
 export const SUPPORTED_MODELS = [
   {
-    name: 'Azure • GPT-5.2 Chat',
-    shortName: 'GPT-5.2 Chat',
-    value: 'azure/gpt-5.2-chat',
+    name: 'Azure • GPT-5.2 Codex',
+    shortName: 'GPT-5.2 Codex',
+    value: 'azure/gpt-5.2-codex',
   },
   {
     name: 'Anthropic • Claude Sonnet 4.5',

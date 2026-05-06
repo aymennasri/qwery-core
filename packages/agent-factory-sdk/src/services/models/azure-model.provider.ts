@@ -35,7 +35,9 @@ export function createAzureModelProvider({
         );
       }
 
-      return resolvedProvider(finalDeployment);
+      // Use Azure Responses API by default so Codex and newer GPT-5 deployments
+      // work through the same provider path as standard text generation.
+      return resolvedProvider.responses(finalDeployment);
     },
   };
 }

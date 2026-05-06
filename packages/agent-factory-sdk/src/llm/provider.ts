@@ -19,7 +19,10 @@ export type Model = {
   };
 };
 
-type SDKWithLanguageModel = { languageModel(modelId: string): LanguageModel };
+type SDKWithLanguageModel = {
+  languageModel(modelId: string): LanguageModel;
+  responses?: (modelId: string) => LanguageModel;
+};
 type CreateProvider = (
   options: Record<string, unknown>,
 ) => SDKWithLanguageModel;
@@ -244,7 +247,12 @@ export const Provider = {
     const cached = languageModelsCache.get(key);
     if (cached) return cached;
     const sdk = await getSDK(model);
-    const language = sdk.languageModel(model.api.id) as LanguageModel;
+    const language =
+      model.providerID === 'azure' &&
+      model.id.includes('codex') &&
+      typeof sdk.responses === 'function'
+        ? (sdk.responses(model.api.id) as LanguageModel)
+        : (sdk.languageModel(model.api.id) as LanguageModel);
     languageModelsCache.set(key, language);
     return language;
   },
