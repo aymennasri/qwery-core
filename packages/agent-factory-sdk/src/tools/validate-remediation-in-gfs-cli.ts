@@ -195,6 +195,21 @@ function partitionActionStatements(
   };
 }
 
+function inferRollbackStatements(actionStatements: string[]): string[] {
+  const rollback: string[] = [];
+
+  for (const statement of actionStatements) {
+    const match = statement.match(
+      /^CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(?:(?:"[^"]+"|[a-zA-Z_][\w$]*)\.)?("[^"]+"|[a-zA-Z_][\w$]*)\b/i,
+    );
+    if (!match?.[1]) continue;
+
+    rollback.push(`DROP INDEX CONCURRENTLY IF EXISTS ${match[1]}`);
+  }
+
+  return rollback;
+}
+
 function buildSessionScopedExplainSql(input: {
   validationQuery: string;
   sessionSetupStatements: string[];
@@ -1334,6 +1349,13 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
         .describe(
           'SQL statements to run on the isolated GFS branch. Provide one statement per array item.',
         ),
+      rollbackStatements: z
+        .array(z.string())
+        .max(MAX_ACTIONS)
+        .optional()
+        .describe(
+          'SQL statements that would roll back the action if applied outside GFS. For CREATE INDEX, provide DROP INDEX CONCURRENTLY IF EXISTS statements.',
+        ),
       branchName: z
         .string()
         .min(3)
@@ -1359,6 +1381,9 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
         const actionStatements = params.actionStatements.map(
           normalizeActionStatement,
         );
+        const rollbackStatements =
+          params.rollbackStatements?.map(normalizeActionStatement) ??
+          inferRollbackStatements(actionStatements);
         const partitionedStatements =
           partitionActionStatements(actionStatements);
 
@@ -1568,6 +1593,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
               rollback: {
                 restoreCheckpoint: `gfs checkout ${baseline.checkpointCommit}`,
                 returnToBranch: `gfs checkout ${statusAfter.branch}`,
+                sql: rollbackStatements,
               },
             },
             validation: {
