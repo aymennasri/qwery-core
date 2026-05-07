@@ -1,0 +1,28 @@
+{
+  "name": "db-audit-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "start": "node dist/index.cjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "bin": {
+    "db-audit": "dist/index.cjs"
+  },
+  "dependencies": {
+    "@qwery/agent-factory-sdk": "workspace:*",
+    "@qwery/domain": "workspace:*",
+    "@qwery/extension-postgresql": "workspace:*",
+    "@qwery/extensions-loader": "workspace:*",
+    "@qwery/extensions-sdk": "workspace:*",
+    "@qwery/repository-in-memory": "workspace:*",
+    "ai": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsup": "^8.5.1",
+    "typescript": "catalog:"
+  }
+}

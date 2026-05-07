@@ -100,6 +100,13 @@ export function registerExtensionsFromFolders(basePaths?: string[]): void {
   initDriverImportsFromFolders(basePaths);
 }
 
+export function registerDriverImport(
+  driverId: string,
+  importFn: DriverImportFn,
+): void {
+  driverImports.set(driverId, importFn);
+}
+
 /**
  * Load the Zod schema from the extension package for server-side use (e.g. getSecretFields).
  * Idempotent: if the extension already has a schema, does nothing.

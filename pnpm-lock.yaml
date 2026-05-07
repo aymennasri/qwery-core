@@ -126,6 +126,40 @@ importers:
         specifier: 'catalog:'
         version: 5.9.3
 
+  apps/db-audit-cli:
+    dependencies:
+      '@qwery/agent-factory-sdk':
+        specifier: workspace:*
+        version: link:../../packages/agent-factory-sdk
+      '@qwery/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@qwery/extension-postgresql':
+        specifier: workspace:*
+        version: link:../../packages/extensions/postgresql
+      '@qwery/extensions-loader':
+        specifier: workspace:*
+        version: link:../../packages/extensions-loader
+      '@qwery/extensions-sdk':
+        specifier: workspace:*
+        version: link:../../packages/extensions-sdk
+      '@qwery/repository-in-memory':
+        specifier: workspace:*
+        version: link:../../packages/repositories/memory
+      ai:
+        specifier: 'catalog:'
+        version: 6.0.59(zod@4.3.6)
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.9.2
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@swc/core@1.15.11(@swc/helpers@0.5.17))(jiti@2.6.1)(postcss@8.5.6)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.1)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+
   apps/desktop:
     dependencies:
       '@qwery/shared':

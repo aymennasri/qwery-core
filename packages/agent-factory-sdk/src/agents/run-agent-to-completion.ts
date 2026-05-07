@@ -99,6 +99,7 @@ export async function runAgentToCompletion(
     extra: {
       repositories,
       conversationId,
+      attachedDatasources: datasources,
       metadataDatasources: datasources,
     },
     messages: [],

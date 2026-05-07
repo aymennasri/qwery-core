@@ -125,9 +125,12 @@ export function getDefaultExtensionPaths(): string[] {
       break;
   }
 
+  const loaderDir = import.meta.url
+    ? path.dirname(fileURLToPath(import.meta.url))
+    : process.cwd();
   const monorepoCandidates = [
     findMonorepoExtensionsPath(process.cwd()),
-    findMonorepoExtensionsPath(path.dirname(fileURLToPath(import.meta.url))),
+    findMonorepoExtensionsPath(loaderDir),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   for (const candidate of monorepoCandidates) {
