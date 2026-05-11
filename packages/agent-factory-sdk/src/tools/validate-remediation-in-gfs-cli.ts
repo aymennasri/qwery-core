@@ -96,9 +96,9 @@ type ResolvedPostgresClientBinaries = {
   majorVersion: string;
 };
 
-type EnsuredGfsBaseline = {
+type EnsuredGfsSessionRepo = {
   repoPath: string;
-  checkpointCommit: string;
+  baseCommit: string;
   postgresMajorVersion: string;
   psqlBinary: string;
   computeStarted: boolean;
@@ -989,7 +989,7 @@ async function runGfsImportWithRetry(
   }
 
   throw new Error(
-    `Timed out importing the baseline dump into the GFS PostgreSQL instance after ${POSTGRES_READY_TIMEOUT_MS}ms. Last error: ${lastError?.message ?? 'unknown error'}`,
+    `Timed out importing the prepared dump into the GFS PostgreSQL instance after ${POSTGRES_READY_TIMEOUT_MS}ms. Last error: ${lastError?.message ?? 'unknown error'}`,
   );
 }
 
@@ -1144,24 +1144,21 @@ async function removeGfsPath(path: string): Promise<void> {
   }
 }
 
-async function ensureGfsBaselineRepo(input: {
-  baselineDir: string;
+async function ensureGfsSessionRepo(input: {
+  sessionDir: string;
   repoPath: string;
   connectionUrl: string;
   dumpPath: string;
   signal: AbortSignal;
   logger: Awaited<ReturnType<typeof getLogger>>;
-}): Promise<EnsuredGfsBaseline> {
-  const postgresClients = await resolvePostgresClientBinaries(
-    input.connectionUrl,
-    input.signal,
-  );
+}): Promise<EnsuredGfsSessionRepo> {
+  const postgresClients = await resolvePostgresClientBinaries(input.connectionUrl, input.signal);
 
-  const cachedCheckpointCommit = await readBranchCommit(input.repoPath, 'main');
-  if (cachedCheckpointCommit) {
+  const cachedBaseCommit = await readBranchCommit(input.repoPath, 'main');
+  if (cachedBaseCommit) {
     return {
       repoPath: input.repoPath,
-      checkpointCommit: cachedCheckpointCommit,
+      baseCommit: cachedBaseCommit,
       postgresMajorVersion: postgresClients.majorVersion,
       psqlBinary: postgresClients.psql,
       computeStarted: false,
@@ -1169,7 +1166,7 @@ async function ensureGfsBaselineRepo(input: {
     };
   }
 
-  await rm(input.baselineDir, { recursive: true, force: true });
+  await rm(input.sessionDir, { recursive: true, force: true });
   await mkdir(input.repoPath, { recursive: true });
 
   try {
@@ -1202,18 +1199,15 @@ async function ensureGfsBaselineRepo(input: {
     await runGfsImportWithRetry(input.repoPath, input.dumpPath, input.signal);
     await runCommand(
       'gfs',
-      ['commit', '-m', 'baseline snapshot before audit remediation'],
+      ['commit', '-m', 'session base snapshot before audit remediation'],
       { cwd: input.repoPath, signal: input.signal },
     );
 
-    const checkpointCommit = await readLatestCommitHash(
-      input.repoPath,
-      input.signal,
-    );
+    const baseCommit = await readLatestCommitHash(input.repoPath, input.signal);
 
     return {
       repoPath: input.repoPath,
-      checkpointCommit,
+      baseCommit,
       postgresMajorVersion: postgresClients.majorVersion,
       psqlBinary: postgresClients.psql,
       computeStarted: true,
@@ -1225,10 +1219,10 @@ async function ensureGfsBaselineRepo(input: {
         repoPath: input.repoPath,
         error: error instanceof Error ? error.message : String(error),
       },
-      'Failed to create cached GFS baseline repo; removing partial baseline directory',
+      'Failed to create conversation-scoped GFS repo; removing partial session directory',
     );
-    await rm(input.baselineDir, { recursive: true, force: true }).catch(() => {
-      // Best-effort cleanup of partial baseline state.
+    await rm(input.sessionDir, { recursive: true, force: true }).catch(() => {
+      // Best-effort cleanup of partial session repo state.
     });
     throw error;
   }
@@ -1237,7 +1231,7 @@ async function ensureGfsBaselineRepo(input: {
 async function cleanupValidationBranch(input: {
   repoPath: string;
   branchName: string;
-  baselineCommit: string;
+  baseCommit: string;
   validationCommit: string | null;
   logger: Awaited<ReturnType<typeof getLogger>>;
 }): Promise<void> {
@@ -1260,7 +1254,7 @@ async function cleanupValidationBranch(input: {
         branchName: input.branchName,
         error: error instanceof Error ? error.message : String(error),
       },
-      'Failed to return cached GFS validation repo to main before cleanup',
+      'Failed to return conversation-scoped GFS repo to main before cleanup',
     );
   });
 
@@ -1283,14 +1277,11 @@ async function cleanupValidationBranch(input: {
         branchName: input.branchName,
         error: error instanceof Error ? error.message : String(error),
       },
-      'Failed to cleanup cached GFS validation branch state',
+      'Failed to cleanup conversation-scoped GFS validation branch state',
     );
   });
 
-  if (
-    input.validationCommit &&
-    input.validationCommit !== input.baselineCommit
-  ) {
+  if (input.validationCommit && input.validationCommit !== input.baseCommit) {
     await cleanupValidationCommit({
       repoPath: input.repoPath,
       commitHash: input.validationCommit,
@@ -1338,7 +1329,7 @@ async function cleanupValidationCommit(input: {
         commitHash: input.commitHash,
         error: error instanceof Error ? error.message : String(error),
       },
-      'Failed to cleanup cached GFS validation commit state',
+      'Failed to cleanup conversation-scoped GFS validation commit state',
     );
   }
 }
@@ -1528,12 +1519,12 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
           conversationId: ctx.conversationId,
           datasourceId: datasource.id,
         });
-        const baselineDir = join(
+        const sessionDir = join(
           workingRoot,
           GFS_CONVERSATIONS_SUBDIR,
           sessionRepoKey,
         );
-        const repoPath = join(baselineDir, 'repo');
+        const repoPath = join(sessionDir, 'repo');
 
         logger.info(
           {
@@ -1549,61 +1540,61 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
         );
 
         let shouldStopCompute = false;
-        let baselineCommit: string | null = null;
+        let baseCommit: string | null = null;
         let validationCommit: string | null = null;
 
         try {
           await runCommand('gfs', ['version'], { signal: ctx.abort });
 
-          const baseline = await ensureGfsBaselineRepo({
-            baselineDir,
+          const sessionRepo = await ensureGfsSessionRepo({
+            sessionDir,
             repoPath,
             connectionUrl,
             dumpPath,
             signal: ctx.abort,
             logger,
           });
-          shouldStopCompute = baseline.computeStarted;
-          baselineCommit = baseline.checkpointCommit;
+          shouldStopCompute = sessionRepo.computeStarted;
+          baseCommit = sessionRepo.baseCommit;
 
           await ctx.metadata({
-            title: baseline.reused
-              ? 'Reused cached GFS baseline repo'
-              : 'Created cached GFS baseline repo',
+            title: sessionRepo.reused
+              ? 'Reused conversation-scoped GFS repo'
+              : 'Created conversation-scoped GFS repo',
             metadata: {
-              baselineDir,
-              repoPath: baseline.repoPath,
+              sessionDir,
+              repoPath: sessionRepo.repoPath,
               sessionRepoKey,
-              reusedBaseline: baseline.reused,
-              checkpointCommit: baseline.checkpointCommit,
-              postgresMajorVersion: baseline.postgresMajorVersion,
-              psqlBinary: baseline.psqlBinary,
+              reusedSessionRepo: sessionRepo.reused,
+              baseCommit: sessionRepo.baseCommit,
+              postgresMajorVersion: sessionRepo.postgresMajorVersion,
+              psqlBinary: sessionRepo.psqlBinary,
               dumpPath,
             },
           });
 
           await runCommand(
             'gfs',
-            ['checkout', '-b', branchName, baseline.checkpointCommit],
+            ['checkout', '-b', branchName, sessionRepo.baseCommit],
             {
-              cwd: baseline.repoPath,
+              cwd: sessionRepo.repoPath,
               signal: ctx.abort,
             },
           );
 
           const statusBefore = await ensureGfsConnectionUrl(
-            baseline.repoPath,
+            sessionRepo.repoPath,
             ctx.abort,
           );
           shouldStopCompute = shouldStopCompute || statusBefore.startedCompute;
           await waitForPostgresReady(
-            baseline.psqlBinary,
+            sessionRepo.psqlBinary,
             statusBefore.connectionUrl,
             ctx.abort,
           );
           const before = parseExplainAnalysis(
             await runPsqlWithRetry(
-              baseline.psqlBinary,
+              sessionRepo.psqlBinary,
               statusBefore.connectionUrl,
               buildExplainSql(params.validationQuery),
               ctx.abort,
@@ -1612,7 +1603,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
 
           for (const statement of partitionedStatements.persistentStatements) {
             await runPsqlWithRetry(
-              baseline.psqlBinary,
+              sessionRepo.psqlBinary,
               statusBefore.connectionUrl,
               statement,
               ctx.abort,
@@ -1624,24 +1615,24 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
               'gfs',
               ['commit', '-m', 'apply audit remediation candidate'],
               {
-                cwd: baseline.repoPath,
+                cwd: sessionRepo.repoPath,
                 signal: ctx.abort,
               },
             );
           }
 
           const afterCommit = await readLatestCommitHash(
-            baseline.repoPath,
+            sessionRepo.repoPath,
             ctx.abort,
           );
           validationCommit = afterCommit;
           const statusAfter = await ensureGfsConnectionUrl(
-            baseline.repoPath,
+            sessionRepo.repoPath,
             ctx.abort,
           );
           shouldStopCompute = shouldStopCompute || statusAfter.startedCompute;
           await waitForPostgresReady(
-            baseline.psqlBinary,
+            sessionRepo.psqlBinary,
             statusAfter.connectionUrl,
             ctx.abort,
           );
@@ -1658,7 +1649,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
               : buildExplainSql(params.validationQuery);
           const after = parseExplainAnalysis(
             await runPsqlWithRetry(
-              baseline.psqlBinary,
+              sessionRepo.psqlBinary,
               statusAfter.connectionUrl,
               afterExplainSql,
               ctx.abort,
@@ -1690,12 +1681,12 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
               provider: datasource.datasource_provider,
             },
             gfs: {
-              repoPath: baseline.repoPath,
+              repoPath: sessionRepo.repoPath,
               branchName: statusAfter.branch,
-              checkpointCommit: baseline.checkpointCommit,
+              checkpointCommit: sessionRepo.baseCommit,
               afterCommit,
               rollback: {
-                restoreCheckpoint: `gfs checkout ${baseline.checkpointCommit}`,
+                restoreCheckpoint: `gfs checkout ${sessionRepo.baseCommit}`,
                 returnToBranch: `gfs checkout ${statusAfter.branch}`,
               },
             },
@@ -1730,7 +1721,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             await cleanupValidationBranch({
               repoPath,
               branchName,
-              baselineCommit: baselineCommit ?? '',
+              baseCommit: baseCommit ?? '',
               validationCommit,
               logger,
             });
