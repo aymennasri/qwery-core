@@ -77,7 +77,9 @@ describe('isSqlRuntimeSettableConfigSetting', () => {
   it('accepts session-settable tuning and observability settings only', () => {
     expect(isSqlRuntimeSettableConfigSetting('work_mem')).toBe(true);
     expect(isSqlRuntimeSettableConfigSetting('random_page_cost')).toBe(true);
-    expect(isSqlRuntimeSettableConfigSetting('effective_cache_size')).toBe(true);
+    expect(isSqlRuntimeSettableConfigSetting('effective_cache_size')).toBe(
+      true,
+    );
     expect(isSqlRuntimeSettableConfigSetting('shared_buffers')).toBe(false);
     expect(isSqlRuntimeSettableConfigSetting('max_wal_size')).toBe(false);
   });

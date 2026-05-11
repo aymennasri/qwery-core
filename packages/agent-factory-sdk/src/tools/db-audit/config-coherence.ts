@@ -82,8 +82,7 @@ export function resolveConfigCoherence(
   const notes: string[] = [];
   const totalMemoryBytes = input.totalMemoryBytes ?? null;
   const logicalCpuCount = input.logicalCpuCount ?? null;
-  const maxParallelWorkersPerGather =
-    input.maxParallelWorkersPerGather ?? null;
+  const maxParallelWorkersPerGather = input.maxParallelWorkersPerGather ?? null;
 
   const activeComplexQueries = normalizePositiveInteger(
     input.activeComplexQueries,

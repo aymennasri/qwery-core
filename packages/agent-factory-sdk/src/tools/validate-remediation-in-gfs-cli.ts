@@ -219,7 +219,9 @@ function extractConfiguredSettingName(statement: string): string | null {
   return null;
 }
 
-function validateConfigActionStatements(input: PartitionedActionStatements): void {
+function validateConfigActionStatements(
+  input: PartitionedActionStatements,
+): void {
   if (input.persistentStatements.length > 0) {
     throw new Error(
       'Config validation only supports session-scoped SET/SET LOCAL/RESET statements; persistent SQL actions are not allowed.',
@@ -398,7 +400,8 @@ function assessValidationResult(
   const accessPathChanged =
     before.plan.accessPathSignature !== after.plan.accessPathSignature;
   const readBlockDelta =
-    before.plan.sharedReadBlocks !== null && after.plan.sharedReadBlocks !== null
+    before.plan.sharedReadBlocks !== null &&
+    after.plan.sharedReadBlocks !== null
       ? after.plan.sharedReadBlocks - before.plan.sharedReadBlocks
       : null;
   const readBlockDeltaPct =
@@ -527,10 +530,9 @@ function assessValidationResult(
       timingOutcome,
       recommendationStatus: 'validated',
       benchmarkSuitability,
-      rationale:
-        !accessPathChanged
-          ? 'The tested change improved the representative benchmark, but the access-path signature did not change.'
-          : 'The tested change improved the representative benchmark and changed the access-path signature.',
+      rationale: !accessPathChanged
+        ? 'The tested change improved the representative benchmark, but the access-path signature did not change.'
+        : 'The tested change improved the representative benchmark and changed the access-path signature.',
       cautions,
     };
   }
@@ -1152,7 +1154,10 @@ async function ensureGfsSessionRepo(input: {
   signal: AbortSignal;
   logger: Awaited<ReturnType<typeof getLogger>>;
 }): Promise<EnsuredGfsSessionRepo> {
-  const postgresClients = await resolvePostgresClientBinaries(input.connectionUrl, input.signal);
+  const postgresClients = await resolvePostgresClientBinaries(
+    input.connectionUrl,
+    input.signal,
+  );
 
   const cachedBaseCommit = await readBranchCommit(input.repoPath, 'main');
   if (cachedBaseCommit) {
@@ -1406,7 +1411,9 @@ async function readGfsConnectionUrl(
 function isMissingGfsConnectionStringError(error: unknown): boolean {
   return (
     error instanceof Error &&
-    error.message.includes('GFS status did not return a database connection string.')
+    error.message.includes(
+      'GFS status did not return a database connection string.',
+    )
   );
 }
 
