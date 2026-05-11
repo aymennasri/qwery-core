@@ -38,6 +38,17 @@ function makeExplainJson(input: {
 }
 
 describe('validate_remediation_in_gfs_cli helpers', () => {
+  it('builds conversation-scoped repo keys', () => {
+    expect(
+      __testables.buildGfsConversationRepoKey({
+        conversationId: '5a11a99c-fe25-4d7c-8e8a-12fe765e378e',
+        datasourceId: '1dd61efe-65b1-438d-bbed-c6a7d96a53ca',
+      }),
+    ).toBe(
+      '5a11a99c-fe25-4d7c-8e8a-12fe765e378e-1dd61efe-65b1-438d-bbed-c6a7d96a53ca',
+    );
+  });
+
   it('parses abbreviated commit hashes from gfs log output', () => {
     expect(
       __testables.parseCommitHash(
@@ -158,6 +169,35 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
     );
   });
 
+  it('extracts config setting names from SET and RESET statements', () => {
+    expect(
+      __testables.extractConfiguredSettingName("SET LOCAL work_mem = '256MB'"),
+    ).toBe('work_mem');
+    expect(
+      __testables.extractConfiguredSettingName('RESET random_page_cost'),
+    ).toBe('random_page_cost');
+  });
+
+  it('rejects restart-only settings in config validations', () => {
+    expect(() =>
+      __testables.validateConfigActionStatements({
+        persistentStatements: [],
+        sessionSetupStatements: ["SET LOCAL shared_buffers = '8GB'"],
+        sessionTeardownStatements: ['RESET shared_buffers'],
+      }),
+    ).toThrow(/SQL-runtime-settable settings/);
+  });
+
+  it('accepts session-settable config validations', () => {
+    expect(() =>
+      __testables.validateConfigActionStatements({
+        persistentStatements: [],
+        sessionSetupStatements: ['SET LOCAL random_page_cost = 1.1'],
+        sessionTeardownStatements: ['RESET random_page_cost'],
+      }),
+    ).not.toThrow();
+  });
+
   it('extracts EXPLAIN JSON from session-scoped psql output', () => {
     const json =
       '[{"Plan":{"Node Type":"Aggregate"},"Planning Time":0.1,"Execution Time":1.2}]';
@@ -186,6 +226,7 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
       ),
     ).toEqual({
       rootNodeType: 'Index Scan',
+      accessPathSignature: 'Index Scan:orders:idx_orders_status_region',
       relationName: 'orders',
       indexName: 'idx_orders_status_region',
       planRows: 100,
@@ -274,6 +315,147 @@ describe('validate_remediation_in_gfs_cli helpers', () => {
       timingOutcome: 'improved',
       recommendationStatus: 'validated',
       benchmarkSuitability: 'low-latency',
+    });
+  });
+
+  it('treats high-residual partial latency improvements as inconclusive', () => {
+    const before = {
+      ...__testables.parseExplainMetrics(
+        makeExplainJson({
+          planningTimeMs: 5,
+          executionTimeMs: 8224,
+          nodeType: 'Limit',
+        }),
+      ),
+      plan: __testables.parseExplainPlanSummary(
+        makeExplainJson({
+          planningTimeMs: 5,
+          executionTimeMs: 8224,
+          nodeType: 'Limit',
+        }),
+      ),
+    };
+    const after = {
+      ...__testables.parseExplainMetrics(
+        makeExplainJson({
+          planningTimeMs: 1,
+          executionTimeMs: 5687,
+          nodeType: 'Limit',
+        }),
+      ),
+      plan: __testables.parseExplainPlanSummary(
+        makeExplainJson({
+          planningTimeMs: 1,
+          executionTimeMs: 5687,
+          nodeType: 'Limit',
+        }),
+      ),
+    };
+
+    expect(__testables.assessValidationResult(before, after)).toMatchObject({
+      timingOutcome: 'improved',
+      recommendationStatus: 'inconclusive',
+      benchmarkSuitability: 'latency-impact',
+    });
+  });
+
+  it('does not validate index changes on timing-only improvement', () => {
+    const before = {
+      ...__testables.parseExplainMetrics(
+        makeExplainJson({
+          planningTimeMs: 3,
+          executionTimeMs: 9939,
+          nodeType: 'Limit',
+          sharedReadBlocks: 50_471,
+        }),
+      ),
+      plan: __testables.parseExplainPlanSummary(
+        makeExplainJson({
+          planningTimeMs: 3,
+          executionTimeMs: 9939,
+          nodeType: 'Limit',
+          sharedReadBlocks: 50_471,
+        }),
+      ),
+    };
+    const after = {
+      ...__testables.parseExplainMetrics(
+        makeExplainJson({
+          planningTimeMs: 1,
+          executionTimeMs: 873,
+          nodeType: 'Limit',
+          sharedReadBlocks: 50_449,
+        }),
+      ),
+      plan: __testables.parseExplainPlanSummary(
+        makeExplainJson({
+          planningTimeMs: 1,
+          executionTimeMs: 873,
+          nodeType: 'Limit',
+          sharedReadBlocks: 50_449,
+        }),
+      ),
+    };
+
+    expect(
+      __testables.assessValidationResult(before, after, 'latency', [
+        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_status ON orders (status)',
+      ]),
+    ).toMatchObject({
+      timingOutcome: 'improved',
+      recommendationStatus: 'inconclusive',
+      benchmarkSuitability: 'latency-impact',
+    });
+  });
+
+  it('validates index changes when access path changes', () => {
+    const before = {
+      ...__testables.parseExplainMetrics(
+        makeExplainJson({
+          planningTimeMs: 3,
+          executionTimeMs: 100,
+          nodeType: 'Seq Scan',
+          sharedReadBlocks: 10_000,
+        }),
+      ),
+      plan: __testables.parseExplainPlanSummary(
+        makeExplainJson({
+          planningTimeMs: 3,
+          executionTimeMs: 100,
+          nodeType: 'Seq Scan',
+          sharedReadBlocks: 10_000,
+        }),
+      ),
+    };
+    const after = {
+      ...__testables.parseExplainMetrics(
+        makeExplainJson({
+          planningTimeMs: 1,
+          executionTimeMs: 10,
+          nodeType: 'Index Scan',
+          indexName: 'idx_orders_status',
+          sharedReadBlocks: 9_900,
+        }),
+      ),
+      plan: __testables.parseExplainPlanSummary(
+        makeExplainJson({
+          planningTimeMs: 1,
+          executionTimeMs: 10,
+          nodeType: 'Index Scan',
+          indexName: 'idx_orders_status',
+          sharedReadBlocks: 9_900,
+        }),
+      ),
+    };
+
+    expect(
+      __testables.assessValidationResult(before, after, 'latency', [
+        'CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status)',
+      ]),
+    ).toMatchObject({
+      timingOutcome: 'improved',
+      recommendationStatus: 'validated',
+      benchmarkSuitability: 'latency-impact',
     });
   });
 

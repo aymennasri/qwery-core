@@ -1,5 +1,5 @@
 import { execFile, type ExecFileException } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +12,10 @@ import {
   isPostgresDatasource,
   resolveAttachedDatasource,
 } from './db-audit/shared';
+import {
+  isSqlRuntimeSettableConfigSetting,
+  normalizeConfigSettingName,
+} from './db-audit/config-coherence';
 
 const DESCRIPTION = `Create a temporary GFS repository from a prepared PostgreSQL dump, create an isolated audit branch, run before/after EXPLAIN ANALYZE measurements around remediation SQL, and return the branch, commits, metrics, and rollback commands. Use this when a recommendation should be validated safely away from the original datasource.`;
 
@@ -27,11 +31,13 @@ const GFS_DUMPS_DIR_ENV_VAR = 'QWERY_GFS_DUMPS_DIR';
 const GFS_DUMP_FILE_ENV_VAR = 'QWERY_GFS_DUMP_FILE';
 const GFS_AUDIT_ROOT_SUBDIR = 'qwery/gfs-audits';
 const GFS_DUMPS_SUBDIR = 'qwery/gfs-dumps';
-const GFS_BASELINES_SUBDIR = 'baselines';
+const GFS_CONVERSATIONS_SUBDIR = 'conversations';
 const GFS_VALIDATION_RUNS_SUBDIR = 'runs';
 const MIN_LATENCY_IMPACT_BENCHMARK_MS = 5;
+const HIGH_RESIDUAL_LATENCY_MS = 1000;
 const NEUTRAL_DELTA_ABS_MS = 1;
 const NEUTRAL_DELTA_PCT = 10;
+const MATERIAL_READ_BLOCK_DELTA_ABS = 100;
 const PSQL_BIN_ENV_VAR = 'QWERY_PSQL_BIN';
 const COMMON_POSTGRES_MAJOR_VERSIONS = ['18', '17', '16', '15', '14', '13'];
 
@@ -55,6 +61,7 @@ type ExplainMetrics = {
 
 type ExplainPlanSummary = {
   rootNodeType: string;
+  accessPathSignature: string;
   relationName: string | null;
   indexName: string | null;
   planRows: number | null;
@@ -94,6 +101,7 @@ type EnsuredGfsBaseline = {
   checkpointCommit: string;
   postgresMajorVersion: string;
   psqlBinary: string;
+  computeStarted: boolean;
   reused: boolean;
 };
 
@@ -195,6 +203,55 @@ function partitionActionStatements(
   };
 }
 
+function extractConfiguredSettingName(statement: string): string | null {
+  const setMatch = statement.match(
+    /^SET(?:\s+LOCAL|\s+SESSION)?\s+([^\s=]+)\s*=/i,
+  );
+  if (setMatch?.[1]) {
+    return normalizeConfigSettingName(setMatch[1]);
+  }
+
+  const resetMatch = statement.match(/^RESET(?:\s+ALL)?\s+([^\s;]+)$/i);
+  if (resetMatch?.[1]) {
+    return normalizeConfigSettingName(resetMatch[1]);
+  }
+
+  return null;
+}
+
+function validateConfigActionStatements(input: PartitionedActionStatements): void {
+  if (input.persistentStatements.length > 0) {
+    throw new Error(
+      'Config validation only supports session-scoped SET/SET LOCAL/RESET statements; persistent SQL actions are not allowed.',
+    );
+  }
+
+  if (input.sessionSetupStatements.length === 0) {
+    throw new Error(
+      'Config validation requires at least one SET or SET LOCAL statement.',
+    );
+  }
+
+  const allStatements = [
+    ...input.sessionSetupStatements,
+    ...input.sessionTeardownStatements,
+  ];
+  for (const statement of allStatements) {
+    const settingName = extractConfiguredSettingName(statement);
+    if (!settingName) {
+      throw new Error(
+        `Unsupported config validation statement: ${statement}. Use SET/SET LOCAL and RESET only.`,
+      );
+    }
+
+    if (!isSqlRuntimeSettableConfigSetting(settingName)) {
+      throw new Error(
+        `Config validation only supports SQL-runtime-settable settings. Received: ${settingName}.`,
+      );
+    }
+  }
+}
+
 function buildSessionScopedExplainSql(input: {
   validationQuery: string;
   sessionSetupStatements: string[];
@@ -281,8 +338,25 @@ function parseExplainPlanSummary(raw: string): ExplainPlanSummary {
   const stringOrNull = (value: unknown): string | null =>
     typeof value === 'string' && value.trim() !== '' ? value : null;
 
+  const collectAccessPaths = (node: Record<string, unknown>): string[] => {
+    const nodeType = stringOrNull(node['Node Type']) ?? 'Unknown';
+    const relationName = stringOrNull(node['Relation Name']) ?? '';
+    const indexName = stringOrNull(node['Index Name']) ?? '';
+    const ownPath = `${nodeType}:${relationName}:${indexName}`;
+    const children = Array.isArray(node.Plans)
+      ? node.Plans.flatMap((child) =>
+          typeof child === 'object' && child !== null
+            ? collectAccessPaths(child as Record<string, unknown>)
+            : [],
+        )
+      : [];
+
+    return [ownPath, ...children];
+  };
+
   return {
     rootNodeType: stringOrNull(planNode['Node Type']) ?? 'Unknown',
+    accessPathSignature: collectAccessPaths(planNode).join('|'),
     relationName: stringOrNull(planNode['Relation Name']),
     indexName: stringOrNull(planNode['Index Name']),
     planRows: numberOrNull(planNode['Plan Rows']),
@@ -303,6 +377,7 @@ function assessValidationResult(
   before: ExplainAnalysis,
   after: ExplainAnalysis,
   validationType: ValidationType = 'latency',
+  actionStatements: string[] = [],
 ): ValidationAssessment {
   const totalDeltaMs = after.totalTimeMs - before.totalTimeMs;
   const deltaPct =
@@ -320,6 +395,26 @@ function assessValidationResult(
     before.totalTimeMs >= MIN_LATENCY_IMPACT_BENCHMARK_MS
       ? 'latency-impact'
       : 'low-latency';
+  const accessPathChanged =
+    before.plan.accessPathSignature !== after.plan.accessPathSignature;
+  const readBlockDelta =
+    before.plan.sharedReadBlocks !== null && after.plan.sharedReadBlocks !== null
+      ? after.plan.sharedReadBlocks - before.plan.sharedReadBlocks
+      : null;
+  const readBlockDeltaPct =
+    readBlockDelta !== null &&
+    before.plan.sharedReadBlocks !== null &&
+    before.plan.sharedReadBlocks > 0
+      ? (readBlockDelta / before.plan.sharedReadBlocks) * 100
+      : null;
+  const materiallyReducedReads =
+    readBlockDelta !== null &&
+    readBlockDeltaPct !== null &&
+    readBlockDelta <= -MATERIAL_READ_BLOCK_DELTA_ABS &&
+    readBlockDeltaPct <= -NEUTRAL_DELTA_PCT;
+  const testsIndexChange = actionStatements.some((statement) =>
+    /^CREATE\s+(?:UNIQUE\s+)?INDEX(?:\s+CONCURRENTLY)?\b/i.test(statement),
+  );
 
   const cautions: string[] = [];
   if (benchmarkSuitability === 'low-latency') {
@@ -327,9 +422,9 @@ function assessValidationResult(
       `Benchmark total time before the change was under ${MIN_LATENCY_IMPACT_BENCHMARK_MS}ms; do not frame this as a user-facing latency-impact finding without a slower representative query.`,
     );
   }
-  if (before.plan.rootNodeType === after.plan.rootNodeType) {
+  if (!accessPathChanged) {
     cautions.push(
-      `The root plan node stayed ${before.plan.rootNodeType}; timing changes may reflect runtime variance rather than a clear plan-shape shift.`,
+      `The access-path signature did not change; timing changes may reflect runtime variance rather than a clear plan-shape shift.`,
     );
   }
 
@@ -340,19 +435,6 @@ function assessValidationResult(
   }
 
   if (validationType === 'config') {
-    const beforeReadBlocks = before.plan.sharedReadBlocks;
-    const afterReadBlocks = after.plan.sharedReadBlocks;
-    const readBlockDelta =
-      beforeReadBlocks !== null && afterReadBlocks !== null
-        ? afterReadBlocks - beforeReadBlocks
-        : null;
-    const readBlockDeltaPct =
-      readBlockDelta !== null &&
-      beforeReadBlocks !== null &&
-      beforeReadBlocks > 0
-        ? (readBlockDelta / beforeReadBlocks) * 100
-        : null;
-
     if (timingOutcome === 'regressed') {
       return {
         timingOutcome,
@@ -363,12 +445,7 @@ function assessValidationResult(
       };
     }
 
-    if (
-      readBlockDelta !== null &&
-      readBlockDeltaPct !== null &&
-      readBlockDelta <= -100 &&
-      readBlockDeltaPct <= -NEUTRAL_DELTA_PCT
-    ) {
+    if (materiallyReducedReads) {
       return {
         timingOutcome,
         recommendationStatus: 'validated',
@@ -415,14 +492,45 @@ function assessValidationResult(
   }
 
   if (timingOutcome === 'improved') {
+    if (
+      after.totalTimeMs >= HIGH_RESIDUAL_LATENCY_MS &&
+      deltaPct !== null &&
+      Math.abs(deltaPct) < 50
+    ) {
+      cautions.push(
+        `The benchmark remains above ${HIGH_RESIDUAL_LATENCY_MS}ms after the change and improved by less than 50%; treat this as a partial improvement, not a production-ready quick win.`,
+      );
+      return {
+        timingOutcome,
+        recommendationStatus: 'inconclusive',
+        benchmarkSuitability,
+        rationale: `The tested change improved the representative benchmark, but residual latency remains high at ${after.totalTimeMs.toFixed(3)}ms.`,
+        cautions,
+      };
+    }
+
+    if (testsIndexChange && !accessPathChanged && !materiallyReducedReads) {
+      cautions.push(
+        'Index validation requires either a changed access path or material shared-read-block reduction; timing-only improvement may be cache/runtime variance.',
+      );
+      return {
+        timingOutcome,
+        recommendationStatus: 'inconclusive',
+        benchmarkSuitability,
+        rationale:
+          'The tested index change improved timing, but did not change the access path or materially reduce shared read blocks.',
+        cautions,
+      };
+    }
+
     return {
       timingOutcome,
       recommendationStatus: 'validated',
       benchmarkSuitability,
       rationale:
-        before.plan.rootNodeType === after.plan.rootNodeType
-          ? 'The tested change improved the representative benchmark, but the plan root node did not change.'
-          : `The tested change improved the representative benchmark and shifted the root plan node from ${before.plan.rootNodeType} to ${after.plan.rootNodeType}.`,
+        !accessPathChanged
+          ? 'The tested change improved the representative benchmark, but the access-path signature did not change.'
+          : 'The tested change improved the representative benchmark and changed the access-path signature.',
       cautions,
     };
   }
@@ -953,26 +1061,11 @@ async function resolvePostgresClientBinaries(
   };
 }
 
-async function buildGfsBaselineCacheKey(input: {
+function buildGfsConversationRepoKey(input: {
+  conversationId: string;
   datasourceId: string;
-  connectionUrl: string;
-  dumpPath: string;
-}): Promise<string> {
-  const dumpStat = await stat(input.dumpPath);
-  const hash = createHash('sha256')
-    .update(input.datasourceId)
-    .update('\0')
-    .update(input.connectionUrl)
-    .update('\0')
-    .update(input.dumpPath)
-    .update('\0')
-    .update(String(dumpStat.size))
-    .update('\0')
-    .update(String(Math.trunc(dumpStat.mtimeMs)))
-    .digest('hex')
-    .slice(0, 24);
-
-  return `${sanitizeDumpName(input.datasourceId)}-${hash}`;
+}): string {
+  return `${sanitizeDumpName(input.conversationId)}-${sanitizeDumpName(input.datasourceId)}`;
 }
 
 async function readBranchCommit(
@@ -1012,10 +1105,7 @@ function isMissingGfsInstanceError(error: unknown): boolean {
 async function clearGfsRuntimeConfig(repoPath: string): Promise<void> {
   const configPath = join(repoPath, '.gfs', 'config.toml');
   const config = await readFile(configPath, 'utf8');
-  const withoutRuntime = config.replace(
-    /\n\[runtime\]\n(?:[^\n\[]+\n?)*/,
-    '\n',
-  );
+  const withoutRuntime = config.replace(/\n\[runtime\]\n(?:[^\n[]+\n?)*/, '\n');
 
   if (withoutRuntime !== config) {
     await writeFile(configPath, withoutRuntime);
@@ -1074,6 +1164,7 @@ async function ensureGfsBaselineRepo(input: {
       checkpointCommit: cachedCheckpointCommit,
       postgresMajorVersion: postgresClients.majorVersion,
       psqlBinary: postgresClients.psql,
+      computeStarted: false,
       reused: true,
     };
   }
@@ -1125,6 +1216,7 @@ async function ensureGfsBaselineRepo(input: {
       checkpointCommit,
       postgresMajorVersion: postgresClients.majorVersion,
       psqlBinary: postgresClients.psql,
+      computeStarted: true,
       reused: false,
     };
   } catch (error) {
@@ -1253,7 +1345,9 @@ async function cleanupValidationCommit(input: {
 
 export const __testables = {
   assessValidationResult,
+  buildGfsConversationRepoKey,
   buildSessionScopedExplainSql,
+  extractConfiguredSettingName,
   extractExplainJsonPayload,
   isRetryablePostgresStartupError,
   partitionActionStatements,
@@ -1261,6 +1355,7 @@ export const __testables = {
   parseCommitHash,
   parseExplainMetrics,
   runGfsValidationExclusive,
+  validateConfigActionStatements,
 };
 
 async function readGfsStatus(
@@ -1317,6 +1412,34 @@ async function readGfsConnectionUrl(
   };
 }
 
+function isMissingGfsConnectionStringError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes('GFS status did not return a database connection string.')
+  );
+}
+
+async function ensureGfsConnectionUrl(
+  repoPath: string,
+  signal: AbortSignal,
+): Promise<{ branch: string; connectionUrl: string; startedCompute: boolean }> {
+  try {
+    const status = await readGfsConnectionUrl(repoPath, signal);
+    return { ...status, startedCompute: false };
+  } catch (error) {
+    if (!isMissingGfsConnectionStringError(error)) {
+      throw error;
+    }
+  }
+
+  await runCommand('gfs', ['compute', 'start'], {
+    cwd: repoPath,
+    signal,
+  });
+  const status = await readGfsConnectionUrl(repoPath, signal);
+  return { ...status, startedCompute: true };
+}
+
 export const ValidateRemediationInGfsCliTool = Tool.define(
   'validate_remediation_in_gfs_cli',
   {
@@ -1362,6 +1485,10 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
         const partitionedStatements =
           partitionActionStatements(actionStatements);
 
+        if (params.validationType === 'config') {
+          validateConfigActionStatements(partitionedStatements);
+        }
+
         const logger = await getLogger();
         const { datasource } = await resolveAttachedDatasource(ctx);
 
@@ -1397,15 +1524,14 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
 
         const workingRoot = resolveGfsAuditWorkingRoot();
         await mkdir(workingRoot, { recursive: true });
-        const baselineCacheKey = await buildGfsBaselineCacheKey({
+        const sessionRepoKey = buildGfsConversationRepoKey({
+          conversationId: ctx.conversationId,
           datasourceId: datasource.id,
-          connectionUrl,
-          dumpPath,
         });
         const baselineDir = join(
           workingRoot,
-          GFS_BASELINES_SUBDIR,
-          baselineCacheKey,
+          GFS_CONVERSATIONS_SUBDIR,
+          sessionRepoKey,
         );
         const repoPath = join(baselineDir, 'repo');
 
@@ -1416,7 +1542,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             datasourceProvider: datasource.datasource_provider,
             branchName,
             dumpPath,
-            baselineCacheKey,
+            sessionRepoKey,
             repoPath,
           },
           'Starting GFS CLI remediation validation',
@@ -1437,7 +1563,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             signal: ctx.abort,
             logger,
           });
-          shouldStopCompute = true;
+          shouldStopCompute = baseline.computeStarted;
           baselineCommit = baseline.checkpointCommit;
 
           await ctx.metadata({
@@ -1447,7 +1573,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             metadata: {
               baselineDir,
               repoPath: baseline.repoPath,
-              baselineCacheKey,
+              sessionRepoKey,
               reusedBaseline: baseline.reused,
               checkpointCommit: baseline.checkpointCommit,
               postgresMajorVersion: baseline.postgresMajorVersion,
@@ -1465,10 +1591,11 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             },
           );
 
-          const statusBefore = await readGfsConnectionUrl(
+          const statusBefore = await ensureGfsConnectionUrl(
             baseline.repoPath,
             ctx.abort,
           );
+          shouldStopCompute = shouldStopCompute || statusBefore.startedCompute;
           await waitForPostgresReady(
             baseline.psqlBinary,
             statusBefore.connectionUrl,
@@ -1508,10 +1635,11 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             ctx.abort,
           );
           validationCommit = afterCommit;
-          const statusAfter = await readGfsConnectionUrl(
+          const statusAfter = await ensureGfsConnectionUrl(
             baseline.repoPath,
             ctx.abort,
           );
+          shouldStopCompute = shouldStopCompute || statusAfter.startedCompute;
           await waitForPostgresReady(
             baseline.psqlBinary,
             statusAfter.connectionUrl,
@@ -1551,6 +1679,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             before,
             after,
             params.validationType,
+            actionStatements,
           );
 
           return {
