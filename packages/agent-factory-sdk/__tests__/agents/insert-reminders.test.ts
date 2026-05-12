@@ -47,7 +47,7 @@ function getUserTextParts(messages: Message[]): string[] {
 }
 
 describe('insertReminders', () => {
-  it('adds todo reminder for db-performance-audit multi-step requests', () => {
+  it('does not add todo reminder for db-performance-audit multi-step requests', () => {
     const messages = [
       makeUserMessage(
         'Run the audit, then explain top bottlenecks and list remediation options.',
@@ -62,7 +62,7 @@ describe('insertReminders', () => {
 
     const textParts = getUserTextParts(result);
     expect(textParts.some((text) => text.includes('todo list tool'))).toBe(
-      true,
+      false,
     );
   });
 

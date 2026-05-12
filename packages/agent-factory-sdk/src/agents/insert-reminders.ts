@@ -7,7 +7,7 @@ const TODO_REMINDER =
   '<system-reminder>\nConsider using the todo list tool to plan and track steps for this request.\n</system-reminder>';
 
 const agentIdsWithDatasourceReminder = ['query', 'ask', 'db-performance-audit'];
-const agentIdsWithTodoReminder = ['query', 'ask', 'db-performance-audit'];
+const agentIdsWithTodoReminder = ['query', 'ask'];
 
 function getLastUserMessageText(lastUser: Message): string {
   const parts = lastUser.content?.parts ?? [];
