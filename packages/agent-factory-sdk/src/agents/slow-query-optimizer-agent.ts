@@ -13,6 +13,7 @@ export const SlowQueryOptimizerAgent = Agent.define('slow-query-optimizer', {
       detect_db_engine: true,
       get_top_slow_queries: true,
       explain_query_plan: true,
+      compare_query_rewrite: true,
       get_statistics_health: true,
       validate_remediation_in_gfs_cli: true,
       runQuery: true,
