@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Tool } from './tool';
 import {
+  getErrorMessage,
   isPostgresDatasource,
   toNumber,
   toSafeLimit,
@@ -11,6 +12,56 @@ import {
 const DESCRIPTION =
   'Collect PostgreSQL infra/VM/network/OS proxy signals (connections, waits, IO, checkpoints, and key runtime settings) to correlate with query analysis.';
 
+function parseProcMeminfoTotalBytes(raw: string | null): number | null {
+  if (!raw) return null;
+  const match = raw.match(/^MemTotal:\s+(\d+)\s+kB$/im);
+  if (!match?.[1]) return null;
+  const kb = Number(match[1]);
+  return Number.isFinite(kb) ? kb * 1024 : null;
+}
+
+function parseCgroupMemoryLimitBytes(raw: string | null): number | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === 'max') return null;
+  const value = Number(trimmed);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function countProcCpuinfoProcessors(raw: string | null): number | null {
+  if (!raw) return null;
+  const matches = raw.match(/^processor\s*:/gim);
+  return matches && matches.length > 0 ? matches.length : null;
+}
+
+function parseCpuSetCount(raw: string | null): number | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  let total = 0;
+  for (const part of trimmed.split(',')) {
+    const segment = part.trim();
+    if (!segment) continue;
+    const rangeMatch = segment.match(/^(\d+)-(\d+)$/);
+    if (rangeMatch?.[1] && rangeMatch[2]) {
+      const start = Number(rangeMatch[1]);
+      const end = Number(rangeMatch[2]);
+      if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
+        total += end - start + 1;
+        continue;
+      }
+    }
+
+    const single = Number(segment);
+    if (Number.isFinite(single)) {
+      total += 1;
+    }
+  }
+
+  return total > 0 ? total : null;
+}
+
 function formatSettingValue(
   setting: string | null,
   unit: string | null,
@@ -18,14 +69,6 @@ function formatSettingValue(
   if (!setting) return null;
   if (!unit) return setting;
   return `${setting} ${unit}`;
-}
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim() !== '') {
-    const firstLine = error.message.split('\n')[0]?.trim();
-    return firstLine || 'unknown error';
-  }
-  return 'unknown error';
 }
 
 export const GetInfraRuntimeSignalsTool = Tool.define(
@@ -59,7 +102,7 @@ export const GetInfraRuntimeSignalsTool = Tool.define(
       return withDatasourceDriver(ctx, async ({ datasource, query }) => {
         if (!isPostgresDatasource(datasource)) {
           throw new Error(
-            `db-performance-audit currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
+            `This tool currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
           );
         }
 
@@ -109,6 +152,17 @@ export const GetInfraRuntimeSignalsTool = Tool.define(
             inet_server_port() AS server_port
         `,
           'Unable to collect PostgreSQL runtime metadata',
+        );
+
+        const hostMetadataRow = await queryOneOrEmpty(
+          `
+          SELECT
+            pg_read_file('/proc/meminfo', 0, 8192, true) AS proc_meminfo,
+            pg_read_file('/sys/fs/cgroup/memory.max', 0, 128, true) AS cgroup_memory_max,
+            pg_read_file('/proc/cpuinfo', 0, 1048576, true) AS proc_cpuinfo,
+            pg_read_file('/sys/fs/cgroup/cpuset.cpus.effective', 0, 256, true) AS cpuset_cpus_effective
+        `,
+          'Unable to collect PostgreSQL host/container resource metadata',
         );
 
         const connectionRow = await queryOneOrEmpty(
@@ -223,7 +277,11 @@ export const GetInfraRuntimeSignalsTool = Tool.define(
             'max_worker_processes',
             'max_parallel_workers',
             'max_parallel_workers_per_gather',
+            'hash_mem_multiplier',
             'jit',
+            'autovacuum_max_workers',
+            'autovacuum_work_mem',
+            'checkpoint_completion_target',
             'tcp_keepalives_idle',
             'tcp_keepalives_interval',
             'tcp_keepalives_count',
@@ -347,6 +405,16 @@ export const GetInfraRuntimeSignalsTool = Tool.define(
           );
         }
 
+        const totalMemoryBytes = parseProcMeminfoTotalBytes(
+          toString(hostMetadataRow['proc_meminfo']),
+        );
+        const cgroupMemoryLimitBytes = parseCgroupMemoryLimitBytes(
+          toString(hostMetadataRow['cgroup_memory_max']),
+        );
+        const logicalCpuCount =
+          parseCpuSetCount(toString(hostMetadataRow['cpuset_cpus_effective'])) ??
+          countProcCpuinfoProcessors(toString(hostMetadataRow['proc_cpuinfo']));
+
         return {
           capturedAt: new Date().toISOString(),
           database: toString(runtimeRow['database_name']) ?? 'unknown',
@@ -358,6 +426,8 @@ export const GetInfraRuntimeSignalsTool = Tool.define(
             hbaFile: toString(runtimeMetadataRow['hba_file']),
             serverAddress: toString(runtimeMetadataRow['server_address']),
             serverPort: toNumber(runtimeMetadataRow['server_port']),
+            totalMemoryBytes,
+            cgroupMemoryLimitBytes,
           },
           connection: {
             maxConnections,
@@ -377,6 +447,7 @@ export const GetInfraRuntimeSignalsTool = Tool.define(
             maxParallelWorkersPerGather:
               toNumber(rawSettingsMap.get('max_parallel_workers_per_gather')) ??
               null,
+            logicalCpuCount,
             jit: settingsMap.get('jit') ?? null,
           },
           network: {
@@ -440,10 +511,18 @@ export const GetInfraRuntimeSignalsTool = Tool.define(
             effectiveCacheSize: settingsMap.get('effective_cache_size') ?? null,
             maxWalSize: settingsMap.get('max_wal_size') ?? null,
             checkpointTimeout: settingsMap.get('checkpoint_timeout') ?? null,
+            checkpointCompletionTarget:
+              settingsMap.get('checkpoint_completion_target') ?? null,
             trackIoTiming: settingsMap.get('track_io_timing') ?? null,
             effectiveIoConcurrency:
               settingsMap.get('effective_io_concurrency') ?? null,
             randomPageCost: settingsMap.get('random_page_cost') ?? null,
+            hashMemMultiplier:
+              settingsMap.get('hash_mem_multiplier') ?? null,
+            autovacuumMaxWorkers:
+              settingsMap.get('autovacuum_max_workers') ?? null,
+            autovacuumWorkMem:
+              settingsMap.get('autovacuum_work_mem') ?? null,
             autovacuum: settingsMap.get('autovacuum') ?? null,
           },
           logging: {

@@ -2,6 +2,7 @@ export * from './agent';
 export * from './ask-agent';
 export * from './query-agent';
 export * from './db-performance-audit-agent';
+export * from './slow-query-optimizer-agent';
 export * from './compaction-agent';
 export * from './summary-agent';
 export { prompt, loop, type AgentSessionPromptInput } from './agent-session';

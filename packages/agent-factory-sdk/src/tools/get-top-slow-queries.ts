@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import {
+  getErrorMessage,
   isPostgresDatasource,
   toNumber,
   toSafeLimit,
@@ -33,14 +34,6 @@ type QuerySummary = {
   localBlksDirtied: number | null;
   tempBlksWritten: number | null;
 };
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim() !== '') {
-    const firstLine = error.message.split('\n')[0]?.trim();
-    return firstLine || 'unknown error';
-  }
-  return 'unknown error';
-}
 
 export function buildPgStatStatementsSql(
   limit: number,
@@ -230,7 +223,7 @@ export const GetTopSlowQueriesTool = Tool.define('get_top_slow_queries', {
     return withDatasourceDriver(ctx, async ({ datasource, query }) => {
       if (!isPostgresDatasource(datasource)) {
         throw new Error(
-          `db-performance-audit currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
+          `This tool currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
         );
       }
 

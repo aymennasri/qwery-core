@@ -3,6 +3,7 @@ import type { Message } from '@qwery/domain/entities';
 import { MessageRole } from '@qwery/domain/entities';
 import { DbPerformanceAuditAgent } from '../../src/agents/db-performance-audit-agent';
 import { insertReminders } from '../../src/agents/insert-reminders';
+import { SlowQueryOptimizerAgent } from '../../src/agents/slow-query-optimizer-agent';
 
 function makeUserMessage(text: string): Message {
   const now = new Date();
@@ -76,6 +77,24 @@ describe('insertReminders', () => {
     });
 
     const textParts = getUserTextParts(result);
+    expect(textParts.some((text) => text.includes('todo list tool'))).toBe(
+      false,
+    );
+  });
+
+  it('adds datasource reminder and no todo reminder for slow-query-optimizer requests', () => {
+    const messages = [
+      makeUserMessage('Optimize the slowest queries, then validate fixes.'),
+    ];
+
+    const result = insertReminders({
+      messages,
+      agent: SlowQueryOptimizerAgent,
+      context: { attachedDatasourceNames: ['production-db'] },
+    });
+
+    const textParts = getUserTextParts(result);
+    expect(textParts.some((text) => text.includes('production-db'))).toBe(true);
     expect(textParts.some((text) => text.includes('todo list tool'))).toBe(
       false,
     );

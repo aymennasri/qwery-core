@@ -339,4 +339,42 @@ describe('CreateMessageService', () => {
     expect(result.error).toBeInstanceOf(ConversationNotFoundError);
     expect(result.error?.conversationSlug).toBe('missing-conversation');
   });
+
+  it('creates a message when given the conversation id instead of slug', async () => {
+    const messageRepository = new MockMessageRepository();
+    const conversationRepository = new MockConversationRepository();
+
+    const conversation: Conversation = {
+      id: conversationId,
+      slug: conversationSlug,
+      projectId,
+      taskId,
+      title: 'Test Conversation',
+      datasources: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      createdBy: userId,
+      updatedBy: userId,
+      isPublic: false,
+    };
+    await conversationRepository.create(conversation);
+
+    const service = new CreateMessageService(
+      messageRepository,
+      conversationRepository,
+    );
+
+    const result = await service.execute({
+      input: {
+        content: { text: 'By id' },
+        role: MessageRole.USER,
+        createdBy: userId,
+      },
+      conversationSlug: conversationId,
+    });
+
+    expect(result.isSuccess).toBe(true);
+    expect(result.value?.conversationId).toBe(conversationId);
+    expect(result.value?.content).toEqual({ text: 'By id' });
+  });
 });

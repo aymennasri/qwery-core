@@ -7,6 +7,7 @@ import {
   AskAgent,
   QueryAgent,
   DbPerformanceAuditAgent,
+  SlowQueryOptimizerAgent,
   CompactionAgent,
   SummaryAgent,
 } from '../agents';
@@ -135,6 +136,7 @@ function registerAgents() {
   agents.set(AskAgent.id, AskAgent);
   agents.set(QueryAgent.id, QueryAgent);
   agents.set(DbPerformanceAuditAgent.id, DbPerformanceAuditAgent);
+  agents.set(SlowQueryOptimizerAgent.id, SlowQueryOptimizerAgent);
   agents.set(CompactionAgent.id, CompactionAgent);
   agents.set(SummaryAgent.id, SummaryAgent);
 }

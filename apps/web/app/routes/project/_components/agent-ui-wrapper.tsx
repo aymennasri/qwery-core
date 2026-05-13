@@ -155,6 +155,12 @@ const AGENT_OPTIONS = [
     autoRunPrompt:
       'Run a PostgreSQL database performance audit for the current datasource. Focus on the top latency-impact findings, back every conclusion with evidence, and include validation steps for each recommendation.',
   },
+  {
+    name: 'Query Optimizer',
+    value: 'slow-query-optimizer',
+    autoRunPrompt:
+      'Optimize the slowest PostgreSQL queries for the current datasource. Pull the slowest queries, inspect their full execution plans, test the strongest fix, and report the measured before and after performance diff.',
+  },
 ];
 
 type SendMessageFn = (
