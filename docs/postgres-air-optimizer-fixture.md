@@ -10,6 +10,16 @@ This document records the intentionally injected expert-level slow-query workloa
 - Connection string: `postgresql://postgres:postgres@localhost:5434/postgres_air?sslmode=disable`
 - `pg_stat_statements`: enabled
 
+For optimizer evals, run the `postgres-air` container with enough shared memory for PostgreSQL parallel hash/sort work. The seeded workload intentionally produces large spills, and Docker's small default `/dev/shm` can cause errors like `could not resize shared memory segment ... No space left on device`.
+
+Example container setting:
+
+```sh
+docker run --name postgres-air --shm-size=1g ...
+```
+
+If the container already exists, recreate it with `--shm-size=1g` or set `shm_size: 1gb` in the compose file that owns the `postgres-air` service.
+
 ## Fixture Goal
 
 Unlike the Pagila audit fixture, this workload is focused on slow-query optimization rather than broad audit findings. The goal is to seed `pg_stat_statements` with realistic, structurally inefficient statements that require expert analysis of execution plans, join fan-out, window churn, late filtering, and query-shape rewrites.

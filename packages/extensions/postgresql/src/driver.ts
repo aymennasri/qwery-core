@@ -21,6 +21,18 @@ import { schema } from './schema';
 
 type Config = z.infer<typeof schema>;
 
+const DEFAULT_POSTGRES_QUERY_TIMEOUT_MS = 120_000;
+
+function getPostgresQueryTimeoutMs(): number {
+  const raw = process.env.QWERY_POSTGRES_OPERATION_TIMEOUT_MS;
+  if (!raw) return DEFAULT_POSTGRES_QUERY_TIMEOUT_MS;
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_POSTGRES_QUERY_TIMEOUT_MS;
+}
+
 export function buildPostgresConfig(config: Config) {
   // Extract connection URL (either from connectionUrl or build from fields)
   const connectionUrl = extractConnectionUrl(
@@ -73,7 +85,7 @@ export function makePostgresDriver(context: DriverContext): IDataSourceDriver {
     return withTimeout(
       clientPromise,
       timeoutMs,
-      `PostgreSQL connection operation timed out after ${timeoutMs}ms`,
+      `PostgreSQL operation timed out after ${timeoutMs}ms`,
     );
   };
 
@@ -189,6 +201,7 @@ export function makePostgresDriver(context: DriverContext): IDataSourceDriver {
       const { rows, rowCount, fields } = (await withClient(
         { connectionUrl },
         (client) => client.query(sql),
+        getPostgresQueryTimeoutMs(),
       )) as PgQueryResult;
 
       return {
@@ -207,4 +220,3 @@ export function makePostgresDriver(context: DriverContext): IDataSourceDriver {
 // Expose a stable factory export for the runtime loader
 export const driverFactory = makePostgresDriver;
 export default driverFactory;
-
