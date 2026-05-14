@@ -761,11 +761,11 @@ export async function prompt(
     .find((m) => m.role === 'user');
   if (lastUserMessage) {
     const logger = await getLogger();
-      const persistence = new MessagePersistenceService(
-        repositories.message,
-        repositories.conversation,
-        conversation?.id ?? conversationSlug,
-      );
+    const persistence = new MessagePersistenceService(
+      repositories.message,
+      repositories.conversation,
+      conversation?.id ?? conversationSlug,
+    );
     try {
       const persistResult = await persistence.persistMessages(
         [lastUserMessage],

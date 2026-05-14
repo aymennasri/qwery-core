@@ -131,7 +131,9 @@ function average(values: Array<number | null>): number | null {
   const numeric = values.filter((value): value is number => value !== null);
   if (numeric.length === 0) return null;
   return Number(
-    (numeric.reduce((sum, value) => sum + value, 0) / numeric.length).toFixed(3),
+    (numeric.reduce((sum, value) => sum + value, 0) / numeric.length).toFixed(
+      3,
+    ),
   );
 }
 
@@ -181,7 +183,9 @@ export const CompareQueryRewriteTool = Tool.define('compare_query_rewrite', {
       .describe('Original SELECT or WITH query to benchmark.'),
     rewrittenQuery: z
       .string()
-      .describe('Rewritten SELECT or WITH query to benchmark against the original.'),
+      .describe(
+        'Rewritten SELECT or WITH query to benchmark against the original.',
+      ),
     runs: z
       .number()
       .int()
@@ -189,7 +193,9 @@ export const CompareQueryRewriteTool = Tool.define('compare_query_rewrite', {
       .max(MAX_RUNS)
       .optional()
       .default(DEFAULT_RUNS)
-      .describe('Number of EXPLAIN ANALYZE runs for each query. Default 3, max 5.'),
+      .describe(
+        'Number of EXPLAIN ANALYZE runs for each query. Default 3, max 5.',
+      ),
     checkEquivalence: z
       .boolean()
       .optional()
@@ -216,7 +222,9 @@ export const CompareQueryRewriteTool = Tool.define('compare_query_rewrite', {
 
       for (let i = 0; i < runs; i += 1) {
         try {
-          const originalExplain = await query(buildExplainSql(params.originalQuery));
+          const originalExplain = await query(
+            buildExplainSql(params.originalQuery),
+          );
           const rewrittenExplain = await query(
             buildExplainSql(params.rewrittenQuery),
           );
@@ -243,18 +251,23 @@ export const CompareQueryRewriteTool = Tool.define('compare_query_rewrite', {
         rewrittenRuns.map((run) => run.totalTimeMs),
       );
       const totalTimeDeltaMs =
-        originalAverageTotalTimeMs !== null && rewrittenAverageTotalTimeMs !== null
+        originalAverageTotalTimeMs !== null &&
+        rewrittenAverageTotalTimeMs !== null
           ? Number(
-              (rewrittenAverageTotalTimeMs - originalAverageTotalTimeMs).toFixed(
-                3,
-              ),
+              (
+                rewrittenAverageTotalTimeMs - originalAverageTotalTimeMs
+              ).toFixed(3),
             )
           : null;
       const totalTimeDeltaPct =
         totalTimeDeltaMs !== null &&
         originalAverageTotalTimeMs !== null &&
         originalAverageTotalTimeMs > 0
-          ? Number(((totalTimeDeltaMs / originalAverageTotalTimeMs) * 100).toFixed(2))
+          ? Number(
+              ((totalTimeDeltaMs / originalAverageTotalTimeMs) * 100).toFixed(
+                2,
+              ),
+            )
           : null;
 
       let equivalence: EquivalenceResult | undefined;
@@ -337,7 +350,8 @@ export const CompareQueryRewriteTool = Tool.define('compare_query_rewrite', {
           improved:
             totalTimeDeltaMs !== null && totalTimeDeltaMs < 0 ? true : false,
           planShapeChanged:
-            originalLast?.accessPathSignature !== rewrittenLast?.accessPathSignature,
+            originalLast?.accessPathSignature !==
+            rewrittenLast?.accessPathSignature,
         },
         equivalence: equivalence ?? {
           checked: false,

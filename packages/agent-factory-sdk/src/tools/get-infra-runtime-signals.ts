@@ -412,7 +412,9 @@ export const GetInfraRuntimeSignalsTool = Tool.define(
           toString(hostMetadataRow['cgroup_memory_max']),
         );
         const logicalCpuCount =
-          parseCpuSetCount(toString(hostMetadataRow['cpuset_cpus_effective'])) ??
+          parseCpuSetCount(
+            toString(hostMetadataRow['cpuset_cpus_effective']),
+          ) ??
           countProcCpuinfoProcessors(toString(hostMetadataRow['proc_cpuinfo']));
 
         return {
@@ -517,12 +519,10 @@ export const GetInfraRuntimeSignalsTool = Tool.define(
             effectiveIoConcurrency:
               settingsMap.get('effective_io_concurrency') ?? null,
             randomPageCost: settingsMap.get('random_page_cost') ?? null,
-            hashMemMultiplier:
-              settingsMap.get('hash_mem_multiplier') ?? null,
+            hashMemMultiplier: settingsMap.get('hash_mem_multiplier') ?? null,
             autovacuumMaxWorkers:
               settingsMap.get('autovacuum_max_workers') ?? null,
-            autovacuumWorkMem:
-              settingsMap.get('autovacuum_work_mem') ?? null,
+            autovacuumWorkMem: settingsMap.get('autovacuum_work_mem') ?? null,
             autovacuum: settingsMap.get('autovacuum') ?? null,
           },
           logging: {
