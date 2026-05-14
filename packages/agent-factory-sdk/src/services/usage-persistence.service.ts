@@ -44,7 +44,7 @@ export class UsagePersistenceService {
     private readonly usageRepository: IUsageRepository,
     private readonly conversationRepository: IConversationRepository,
     private readonly projectRepository: IProjectRepository,
-    private readonly conversationSlug: string,
+    private readonly conversationRef: string,
   ) {}
 
   /**
@@ -96,7 +96,7 @@ export class UsagePersistenceService {
 
     await useCase.execute({
       input: input as CreateUsageInput,
-      conversationSlug: this.conversationSlug,
+      conversationSlug: this.conversationRef,
     });
   }
 }

@@ -54,7 +54,7 @@ export class MessagePersistenceService {
   constructor(
     private readonly messageRepository: IMessageRepository,
     private readonly conversationRepository: IConversationRepository,
-    private readonly conversationSlug: string,
+    private readonly conversationRef: string,
   ) {}
   async persistMessages(
     messages: UIMessage[],
@@ -71,9 +71,9 @@ export class MessagePersistenceService {
     const opts = options ?? {};
     let resolvedCreatedBy: string | null = null;
     try {
-      const conversation = await this.conversationRepository.findBySlug(
-        this.conversationSlug,
-      );
+      const conversation =
+        (await this.conversationRepository.findBySlug(this.conversationRef)) ??
+        (await this.conversationRepository.findById(this.conversationRef));
       if (conversation && conversation.createdBy?.trim()) {
         resolvedCreatedBy = conversation.createdBy;
       } else if (opts.createdBy?.trim()) {
@@ -92,7 +92,7 @@ export class MessagePersistenceService {
     if (!resolvedCreatedBy) {
       const logger = await getLogger();
       logger.warn(
-        `MessagePersistenceService: no valid createdBy resolved for conversation '${this.conversationSlug}', skipping persistence`,
+        `MessagePersistenceService: no valid createdBy resolved for conversation '${this.conversationRef}', skipping persistence`,
       );
       return { errors: [] };
     }
@@ -136,7 +136,7 @@ export class MessagePersistenceService {
             createdBy: resolvedCreatedBy,
             ...metadataInput,
           },
-          conversationSlug: this.conversationSlug,
+          conversationSlug: this.conversationRef,
         });
 
         if (result.isFailure && result.error) {

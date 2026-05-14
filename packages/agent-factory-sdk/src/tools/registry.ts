@@ -7,6 +7,7 @@ import {
   AskAgent,
   QueryAgent,
   DbPerformanceAuditAgent,
+  SlowQueryOptimizerAgent,
   CompactionAgent,
   SummaryAgent,
 } from '../agents';
@@ -22,6 +23,7 @@ import { TaskTool } from './task';
 import { DetectDbEngineTool } from './detect-db-engine';
 import { GetTopSlowQueriesTool } from './get-top-slow-queries';
 import { ExplainQueryPlanTool } from './explain-query-plan';
+import { CompareQueryRewriteTool } from './compare-query-rewrite';
 import { GetIndexHealthTool } from './get-index-health';
 import { GetTableHealthTool } from './get-table-health';
 import { GetInfraRuntimeSignalsTool } from './get-infra-runtime-signals';
@@ -102,6 +104,10 @@ function registerTools() {
     ExplainQueryPlanTool.id,
     ExplainQueryPlanTool as unknown as ToolInfo,
   );
+  tools.set(
+    CompareQueryRewriteTool.id,
+    CompareQueryRewriteTool as unknown as ToolInfo,
+  );
   tools.set(GetIndexHealthTool.id, GetIndexHealthTool as unknown as ToolInfo);
   tools.set(GetTableHealthTool.id, GetTableHealthTool as unknown as ToolInfo);
   tools.set(
@@ -135,6 +141,7 @@ function registerAgents() {
   agents.set(AskAgent.id, AskAgent);
   agents.set(QueryAgent.id, QueryAgent);
   agents.set(DbPerformanceAuditAgent.id, DbPerformanceAuditAgent);
+  agents.set(SlowQueryOptimizerAgent.id, SlowQueryOptimizerAgent);
   agents.set(CompactionAgent.id, CompactionAgent);
   agents.set(SummaryAgent.id, SummaryAgent);
 }

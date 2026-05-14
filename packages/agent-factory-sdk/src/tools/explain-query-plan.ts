@@ -119,7 +119,7 @@ type NodeCounters = {
   bitmapIndexScanNodes: number;
   nestedLoopNodes: number;
   hashJoinNodes: number;
-  mergJoinNodes: number;
+  mergeJoinNodes: number;
   sortNodes: number;
   hashNodes: number;
   gatherNodes: number;
@@ -137,7 +137,7 @@ function extractNodeCounters(root: PlanObject): NodeCounters {
     bitmapIndexScanNodes: 0,
     nestedLoopNodes: 0,
     hashJoinNodes: 0,
-    mergJoinNodes: 0,
+    mergeJoinNodes: 0,
     sortNodes: 0,
     hashNodes: 0,
     gatherNodes: 0,
@@ -152,7 +152,7 @@ function extractNodeCounters(root: PlanObject): NodeCounters {
     else if (t === 'Bitmap Index Scan') c.bitmapIndexScanNodes += 1;
     else if (t === 'Nested Loop') c.nestedLoopNodes += 1;
     else if (t === 'Hash Join') c.hashJoinNodes += 1;
-    else if (t === 'Merge Join') c.mergJoinNodes += 1;
+    else if (t === 'Merge Join') c.mergeJoinNodes += 1;
     else if (t === 'Sort') c.sortNodes += 1;
     else if (t === 'Hash') c.hashNodes += 1;
     else if (t === 'Gather' || t === 'Gather Merge') c.gatherNodes += 1;
@@ -410,7 +410,7 @@ export const ExplainQueryPlanTool = Tool.define('explain_query_plan', {
     return withDatasourceDriver(ctx, async ({ datasource, query }) => {
       if (!isPostgresDatasource(datasource)) {
         throw new Error(
-          `db-performance-audit currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
+          `This tool currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
         );
       }
 
@@ -470,7 +470,7 @@ export const ExplainQueryPlanTool = Tool.define('explain_query_plan', {
             bitmapIndexScanNodes: 0,
             nestedLoopNodes: 0,
             hashJoinNodes: 0,
-            mergJoinNodes: 0,
+            mergeJoinNodes: 0,
             sortNodes: 0,
             hashNodes: 0,
             gatherNodes: 0,

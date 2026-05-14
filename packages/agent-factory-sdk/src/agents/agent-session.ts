@@ -478,7 +478,7 @@ export async function loop(input: AgentSessionPromptInput): Promise<Response> {
           repositories.usage,
           repositories.conversation,
           repositories.project,
-          conversationSlug,
+          conversationId,
         );
         try {
           await usagePersistenceService.persistUsage(
@@ -523,7 +523,7 @@ export async function loop(input: AgentSessionPromptInput): Promise<Response> {
         const persistence = new MessagePersistenceService(
           repositories.message,
           repositories.conversation,
-          conversationSlug,
+          conversationId,
         );
         try {
           const persistResult = await persistence.persistMessages(
@@ -761,11 +761,11 @@ export async function prompt(
     .find((m) => m.role === 'user');
   if (lastUserMessage) {
     const logger = await getLogger();
-    const persistence = new MessagePersistenceService(
-      repositories.message,
-      repositories.conversation,
-      conversationSlug,
-    );
+      const persistence = new MessagePersistenceService(
+        repositories.message,
+        repositories.conversation,
+        conversation?.id ?? conversationSlug,
+      );
     try {
       const persistResult = await persistence.persistMessages(
         [lastUserMessage],

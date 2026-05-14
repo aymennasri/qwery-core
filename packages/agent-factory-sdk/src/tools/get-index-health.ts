@@ -38,7 +38,7 @@ export const GetIndexHealthTool = Tool.define('get_index_health', {
     return withDatasourceDriver(ctx, async ({ datasource, query }) => {
       if (!isPostgresDatasource(datasource)) {
         throw new Error(
-          `db-performance-audit currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
+          `This tool currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
         );
       }
 

@@ -127,4 +127,35 @@ describe('RunQueryTool', () => {
     expect(extensionsRegistryGetMock).not.toHaveBeenCalled();
     expect(getDriverInstanceMock).not.toHaveBeenCalled();
   });
+
+  it('blocks write-capable SQL for slow-query-optimizer before opening a driver', async () => {
+    const findById = vi.fn();
+
+    if (
+      !('execute' in RunQueryTool) ||
+      typeof RunQueryTool.execute !== 'function'
+    ) {
+      throw new Error(
+        'RunQueryTool does not expose a synchronous execute function',
+      );
+    }
+
+    await expect(
+      RunQueryTool.execute(
+        {
+          datasourceId: 'ds2',
+          query: 'CREATE INDEX CONCURRENTLY idx_users_email ON users (email)',
+          exportFilename: 'blocked-write',
+        },
+        createContext({
+          agentId: 'slow-query-optimizer',
+          findById,
+        }),
+      ),
+    ).rejects.toThrow('Only read-only SQL statements are allowed');
+
+    expect(findById).not.toHaveBeenCalled();
+    expect(extensionsRegistryGetMock).not.toHaveBeenCalled();
+    expect(getDriverInstanceMock).not.toHaveBeenCalled();
+  });
 });

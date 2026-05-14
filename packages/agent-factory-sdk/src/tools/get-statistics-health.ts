@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Tool } from './tool';
 import {
+  getErrorMessage,
   isPostgresDatasource,
   toNumber,
   toSafeLimit,
@@ -10,14 +11,6 @@ import {
 
 const DESCRIPTION =
   'Assess PostgreSQL statistics freshness: tables with stale or missing stats, high-modification tables whose stats are out of date, and columns with suspect n_distinct values that can cause cardinality misestimation.';
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim() !== '') {
-    const firstLine = error.message.split('\n')[0]?.trim();
-    return firstLine || 'unknown error';
-  }
-  return 'unknown error';
-}
 
 export const GetStatisticsHealthTool = Tool.define('get_statistics_health', {
   description: DESCRIPTION,
@@ -59,7 +52,7 @@ export const GetStatisticsHealthTool = Tool.define('get_statistics_health', {
     return withDatasourceDriver(ctx, async ({ datasource, query }) => {
       if (!isPostgresDatasource(datasource)) {
         throw new Error(
-          `db-performance-audit currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
+          `This tool currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
         );
       }
 

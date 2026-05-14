@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Tool } from './tool';
 import {
+  getErrorMessage,
   isPostgresDatasource,
   toNumber,
   toSafeLimit,
@@ -10,14 +11,6 @@ import {
 
 const DESCRIPTION =
   'Estimate PostgreSQL table and index bloat using pg_catalog approximations (no pgstattuple required). Returns wasted-space estimates per table and low-usage oversized indexes as bloat candidates.';
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim() !== '') {
-    const firstLine = error.message.split('\n')[0]?.trim();
-    return firstLine || 'unknown error';
-  }
-  return 'unknown error';
-}
 
 export const GetBloatEstimatesTool = Tool.define('get_bloat_estimates', {
   description: DESCRIPTION,
@@ -50,7 +43,7 @@ export const GetBloatEstimatesTool = Tool.define('get_bloat_estimates', {
     return withDatasourceDriver(ctx, async ({ datasource, query }) => {
       if (!isPostgresDatasource(datasource)) {
         throw new Error(
-          `db-performance-audit currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
+          `This tool currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
         );
       }
 
