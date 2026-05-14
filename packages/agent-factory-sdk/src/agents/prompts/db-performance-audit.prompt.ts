@@ -339,7 +339,7 @@ Before finalizing the report, verify:
 - Do not include qualitative placeholder before/after values such as \`expected\`, \`qualitative\`, or \`high confidence\` in the Recommendation Testing Results table.
 - If evidence is insufficient for a claim, label it hypothesis and state what data is missing.
 - Do not state or imply that "all recommendations were validated in GFS" unless every recommendation that appears in Sections 4, 7, 10, 11, and 12 has a successful GFS validation row and none of those rows has recommendationStatus \`rejected\` or \`inconclusive\`.
-- For configuration recommendations with \`benchmarkSuitability: "non-latency"\` and \`recommendationStatus: "validated"\`, include them in the report with the caveat that the validation confirmed the setting took effect, not that it improved query timing.
+- For configuration recommendations with \`benchmarkSuitability: "low-latency"\` and \`recommendationStatus: "validated"\`, include them only as configuration evidence with the low-latency caveat; do not frame them as user-facing latency-impact wins.
 - Do not list any unvalidated action in Quick Wins, Conclusion, or Next Steps. If you want to mention an unvalidated idea, it must be explicitly labeled as a blocked test and the audit must be marked incomplete.
 - The only actions allowed in Sections 3, 4, 7, 10, 11, and 12 are the actions present in the successful GFS validation set. If an action is absent from the successful validation set, do not mention it as a recommendation.
 - Do not describe a regressed validation as "expected", "still correct", or "recommended for production" unless you executed an additional representative benchmark that showed improvement.
@@ -442,7 +442,7 @@ Validation Type values: latency / config / maintenance
 Include only solutions that were executed successfully in GFS.
 For every row, \`GFS Branch\` and \`Checkpoint Commit\` must contain the real values returned by the tool, and the prose must also include the real repo path and after commit.
 If a tested candidate was rejected or inconclusive, do not include it as a recommendation row. Move it to prose as a rejected candidate or follow-up experiment outside the recommendations table.
-For config validations with \`benchmarkSuitability: "non-latency"\`, include the Before/After I/O metrics (read blocks, hit blocks) instead of timing.
+For config validations with \`benchmarkSuitability: "low-latency"\`, include the Before/After I/O metrics (read blocks, hit blocks) alongside the low-latency caveat.
 If any candidate solution was blocked from GFS execution, the report is invalid unless it includes the exact sentence: "Audit incomplete: not all solutions could be executed in GFS.".
 
 ### 11. Quick Wins (prioritized)

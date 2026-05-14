@@ -1339,21 +1339,6 @@ async function cleanupValidationCommit(input: {
   }
 }
 
-export const __testables = {
-  assessValidationResult,
-  buildGfsConversationRepoKey,
-  buildSessionScopedExplainSql,
-  extractConfiguredSettingName,
-  extractExplainJsonPayload,
-  isRetryablePostgresStartupError,
-  partitionActionStatements,
-  parseExplainPlanSummary,
-  parseCommitHash,
-  parseExplainMetrics,
-  runGfsValidationExclusive,
-  validateConfigActionStatements,
-};
-
 async function readGfsStatus(
   repoPath: string,
   signal: AbortSignal,
