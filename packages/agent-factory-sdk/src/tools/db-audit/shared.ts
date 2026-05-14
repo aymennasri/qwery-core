@@ -205,6 +205,14 @@ export function toString(value: unknown): string | null {
   return null;
 }
 
+export function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim() !== '') {
+    const firstLine = error.message.split('\n')[0]?.trim();
+    return firstLine || 'unknown error';
+  }
+  return 'unknown error';
+}
+
 export function isPostgresDatasource(datasource: Datasource): boolean {
   const provider = datasource.datasource_provider.toLowerCase();
   return provider.includes('postgres');
