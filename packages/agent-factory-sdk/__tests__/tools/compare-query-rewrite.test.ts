@@ -204,10 +204,16 @@ describe('CompareQueryRewriteTool', () => {
       },
     });
 
-    expect((result as Record<string, any>).confidence.caveats).toEqual(
+    expect(
+      (result as { confidence: { caveats: string[] } }).confidence.caveats,
+    ).toEqual(
       expect.arrayContaining([
-        expect.stringContaining('Result equivalence check was skipped because the measured query runtime exceeded 10000ms'),
-        expect.stringContaining('Timing changed without an access-path signature change'),
+        expect.stringContaining(
+          'Result equivalence check was skipped because the measured query runtime exceeded 10000ms',
+        ),
+        expect.stringContaining(
+          'Timing changed without an access-path signature change',
+        ),
       ]),
     );
   });
