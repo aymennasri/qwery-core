@@ -223,7 +223,9 @@ function buildConfidenceAssessment(input: {
     input.totalTimeDeltaPct !== null &&
     Math.abs(input.totalTimeDeltaPct) < 5
   ) {
-    caveats.push('Measured runtime delta is below 5%, which is often noise-sensitive.');
+    caveats.push(
+      'Measured runtime delta is below 5%, which is often noise-sensitive.',
+    );
   }
 
   let level: ConfidenceLevel = 'high';
@@ -294,8 +296,9 @@ export const CompareQueryRewriteTool = Tool.define('compare_query_rewrite', {
           const runOrder = executionOrderForRun(i);
           executionOrderByRun.push([...runOrder]);
 
-          const explainRows: Partial<Record<QueryVariant, Record<string, unknown>>> =
-            {};
+          const explainRows: Partial<
+            Record<QueryVariant, Record<string, unknown>>
+          > = {};
 
           for (const variant of runOrder) {
             const explainResult = await query(
@@ -399,7 +402,8 @@ export const CompareQueryRewriteTool = Tool.define('compare_query_rewrite', {
       const originalLast = originalRuns[originalRuns.length - 1];
       const rewrittenLast = rewrittenRuns[rewrittenRuns.length - 1];
       const planShapeChanged =
-        originalLast?.accessPathSignature !== rewrittenLast?.accessPathSignature;
+        originalLast?.accessPathSignature !==
+        rewrittenLast?.accessPathSignature;
       const confidence = buildConfidenceAssessment({
         requestedRuns: runs,
         completedRuns: originalRuns.length,
