@@ -45,6 +45,15 @@ type EquivalenceResult =
       caveat: string;
     };
 
+type QueryVariant = 'original' | 'rewritten';
+
+type ConfidenceLevel = 'high' | 'medium' | 'low';
+
+type ConfidenceAssessment = {
+  level: ConfidenceLevel;
+  caveats: string[];
+};
+
 function buildExplainSql(query: string): string {
   const trimmed = query.trim().replace(/;\s*$/, '');
   return `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${trimmed}`;
@@ -175,6 +184,65 @@ function getErrorMessage(error: unknown): string {
     : 'unknown error';
 }
 
+function executionOrderForRun(index: number): [QueryVariant, QueryVariant] {
+  return index % 2 === 0
+    ? ['original', 'rewritten']
+    : ['rewritten', 'original'];
+}
+
+function buildConfidenceAssessment(input: {
+  requestedRuns: number;
+  completedRuns: number;
+  equivalence: EquivalenceResult;
+  planShapeChanged: boolean;
+  totalTimeDeltaPct: number | null;
+}): ConfidenceAssessment {
+  const caveats: string[] = [];
+
+  if (input.completedRuns < input.requestedRuns) {
+    caveats.push(
+      `Only ${input.completedRuns} of ${input.requestedRuns} requested benchmark runs completed.`,
+    );
+  }
+
+  if (!input.equivalence.checked) {
+    caveats.push(input.equivalence.caveat);
+  } else if (!input.equivalence.equivalent) {
+    caveats.push('Result equivalence check failed.');
+  } else if (input.equivalence.caveat) {
+    caveats.push(input.equivalence.caveat);
+  }
+
+  if (!input.planShapeChanged) {
+    caveats.push(
+      'Timing changed without an access-path signature change; cache effects or runtime noise may explain part of the delta.',
+    );
+  }
+
+  if (
+    input.totalTimeDeltaPct !== null &&
+    Math.abs(input.totalTimeDeltaPct) < 5
+  ) {
+    caveats.push('Measured runtime delta is below 5%, which is often noise-sensitive.');
+  }
+
+  let level: ConfidenceLevel = 'high';
+  if (
+    input.completedRuns < 3 ||
+    !input.equivalence.checked ||
+    !input.equivalence.equivalent
+  ) {
+    level = 'low';
+  } else if (!input.planShapeChanged) {
+    level = 'medium';
+  }
+
+  return {
+    level,
+    caveats,
+  };
+}
+
 export const CompareQueryRewriteTool = Tool.define('compare_query_rewrite', {
   description: DESCRIPTION,
   parameters: z.object({
@@ -219,17 +287,33 @@ export const CompareQueryRewriteTool = Tool.define('compare_query_rewrite', {
       const originalRuns: ExplainMetrics[] = [];
       const rewrittenRuns: ExplainMetrics[] = [];
       const runErrors: string[] = [];
+      const executionOrderByRun: QueryVariant[][] = [];
 
       for (let i = 0; i < runs; i += 1) {
         try {
-          const originalExplain = await query(
-            buildExplainSql(params.originalQuery),
-          );
-          const rewrittenExplain = await query(
-            buildExplainSql(params.rewrittenQuery),
-          );
-          const originalRow = originalExplain.rows[0];
-          const rewrittenRow = rewrittenExplain.rows[0];
+          const runOrder = executionOrderForRun(i);
+          executionOrderByRun.push([...runOrder]);
+
+          const explainRows: Partial<Record<QueryVariant, Record<string, unknown>>> =
+            {};
+
+          for (const variant of runOrder) {
+            const explainResult = await query(
+              buildExplainSql(
+                variant === 'original'
+                  ? params.originalQuery
+                  : params.rewrittenQuery,
+              ),
+            );
+            const explainRow = explainResult.rows[0];
+            if (!explainRow) {
+              throw new Error('EXPLAIN returned no rows for query comparison.');
+            }
+            explainRows[variant] = explainRow;
+          }
+
+          const originalRow = explainRows.original;
+          const rewrittenRow = explainRows.rewritten;
           if (!originalRow || !rewrittenRow) {
             throw new Error('EXPLAIN returned no rows for query comparison.');
           }
@@ -314,6 +398,18 @@ export const CompareQueryRewriteTool = Tool.define('compare_query_rewrite', {
 
       const originalLast = originalRuns[originalRuns.length - 1];
       const rewrittenLast = rewrittenRuns[rewrittenRuns.length - 1];
+      const planShapeChanged =
+        originalLast?.accessPathSignature !== rewrittenLast?.accessPathSignature;
+      const confidence = buildConfidenceAssessment({
+        requestedRuns: runs,
+        completedRuns: originalRuns.length,
+        equivalence: equivalence ?? {
+          checked: false,
+          caveat: 'Result equivalence check was skipped.',
+        },
+        planShapeChanged,
+        totalTimeDeltaPct,
+      });
 
       return {
         datasource: {
@@ -325,6 +421,7 @@ export const CompareQueryRewriteTool = Tool.define('compare_query_rewrite', {
         comparisonType: 'read-only-query-rewrite',
         requestedRuns: runs,
         completedRuns: originalRuns.length,
+        executionOrderByRun,
         runErrors,
         original: {
           query: params.originalQuery.trim(),
@@ -349,14 +446,13 @@ export const CompareQueryRewriteTool = Tool.define('compare_query_rewrite', {
           totalTimePct: totalTimeDeltaPct,
           improved:
             totalTimeDeltaMs !== null && totalTimeDeltaMs < 0 ? true : false,
-          planShapeChanged:
-            originalLast?.accessPathSignature !==
-            rewrittenLast?.accessPathSignature,
+          planShapeChanged,
         },
         equivalence: equivalence ?? {
           checked: false,
           caveat: 'Result equivalence check was skipped.',
         },
+        confidence,
       };
     });
   },
