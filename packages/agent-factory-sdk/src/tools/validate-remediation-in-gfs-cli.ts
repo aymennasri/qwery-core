@@ -1,6 +1,6 @@
 import { execFile, type ExecFileException } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -33,6 +33,7 @@ const GFS_AUDIT_ROOT_SUBDIR = 'qwery/gfs-audits';
 const GFS_DUMPS_SUBDIR = 'qwery/gfs-dumps';
 const GFS_CONVERSATIONS_SUBDIR = 'conversations';
 const GFS_VALIDATION_RUNS_SUBDIR = 'runs';
+const DUMP_FINGERPRINT_FILE = 'dump-fingerprint';
 const MIN_LATENCY_IMPACT_BENCHMARK_MS = 5;
 const HIGH_RESIDUAL_LATENCY_MS = 1000;
 const NEUTRAL_DELTA_ABS_MS = 1;
@@ -1146,6 +1147,30 @@ async function removeGfsPath(path: string): Promise<void> {
   }
 }
 
+async function computeDumpFingerprint(dumpPath: string): Promise<string> {
+  const stats = await stat(dumpPath);
+  return `${stats.size}:${Math.trunc(stats.mtimeMs)}`;
+}
+
+async function readCachedDumpFingerprint(
+  sessionDir: string,
+): Promise<string | null> {
+  try {
+    const raw = await readFile(join(sessionDir, DUMP_FINGERPRINT_FILE), 'utf8');
+    const trimmed = raw.trim();
+    return trimmed === '' ? null : trimmed;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCachedDumpFingerprint(
+  sessionDir: string,
+  fingerprint: string,
+): Promise<void> {
+  await writeFile(join(sessionDir, DUMP_FINGERPRINT_FILE), fingerprint);
+}
+
 async function ensureGfsSessionRepo(input: {
   sessionDir: string;
   repoPath: string;
@@ -1159,8 +1184,13 @@ async function ensureGfsSessionRepo(input: {
     input.signal,
   );
 
+  const currentDumpFingerprint = await computeDumpFingerprint(input.dumpPath);
   const cachedBaseCommit = await readBranchCommit(input.repoPath, 'main');
-  if (cachedBaseCommit) {
+  const cachedDumpFingerprint = cachedBaseCommit
+    ? await readCachedDumpFingerprint(input.sessionDir)
+    : null;
+
+  if (cachedBaseCommit && cachedDumpFingerprint === currentDumpFingerprint) {
     return {
       repoPath: input.repoPath,
       baseCommit: cachedBaseCommit,
@@ -1169,6 +1199,17 @@ async function ensureGfsSessionRepo(input: {
       computeStarted: false,
       reused: true,
     };
+  }
+
+  if (cachedBaseCommit) {
+    input.logger.info(
+      {
+        sessionDir: input.sessionDir,
+        cachedDumpFingerprint,
+        currentDumpFingerprint,
+      },
+      'Cached GFS session repo dump fingerprint mismatch; rebuilding from current dump',
+    );
   }
 
   await rm(input.sessionDir, { recursive: true, force: true });
@@ -1209,6 +1250,7 @@ async function ensureGfsSessionRepo(input: {
     );
 
     const baseCommit = await readLatestCommitHash(input.repoPath, input.signal);
+    await writeCachedDumpFingerprint(input.sessionDir, currentDumpFingerprint);
 
     return {
       repoPath: input.repoPath,
@@ -1238,6 +1280,7 @@ async function cleanupValidationBranch(input: {
   branchName: string;
   baseCommit: string;
   validationCommit: string | null;
+  stopCompute: boolean;
   logger: Awaited<ReturnType<typeof getLogger>>;
 }): Promise<void> {
   await runCommand('gfs', ['checkout', 'main'], {
@@ -1263,12 +1306,14 @@ async function cleanupValidationBranch(input: {
     );
   });
 
-  await runCommand('gfs', ['compute', 'stop'], {
-    cwd: input.repoPath,
-    timeoutMs: COMPUTE_STOP_TIMEOUT_MS,
-  }).catch(() => {
-    // The main compute instance may already be stopped.
-  });
+  if (input.stopCompute) {
+    await runCommand('gfs', ['compute', 'stop'], {
+      cwd: input.repoPath,
+      timeoutMs: COMPUTE_STOP_TIMEOUT_MS,
+    }).catch(() => {
+      // The main compute instance may already be stopped.
+    });
+  }
 
   await Promise.all([
     removeGfsPath(join(input.repoPath, '.gfs', 'workspaces', input.branchName)),
@@ -1287,17 +1332,84 @@ async function cleanupValidationBranch(input: {
   });
 
   if (input.validationCommit && input.validationCommit !== input.baseCommit) {
+    const protectedHashes = await readCommitReferencedHashes(
+      input.repoPath,
+      input.baseCommit,
+    );
     await cleanupValidationCommit({
       repoPath: input.repoPath,
       commitHash: input.validationCommit,
+      protectedHashes,
       logger: input.logger,
     });
+  }
+}
+
+const COMMIT_OBJECT_HASH_FIELDS = [
+  'snapshot_hash',
+  'schema_hash',
+  'files_ref',
+] as const;
+
+type ParsedCommitObject = Partial<
+  Record<(typeof COMMIT_OBJECT_HASH_FIELDS)[number], unknown>
+>;
+
+async function readCommitObject(
+  repoPath: string,
+  commitHash: string,
+): Promise<ParsedCommitObject | null> {
+  try {
+    const raw = await readFile(
+      join(
+        repoPath,
+        '.gfs',
+        'objects',
+        commitHash.slice(0, 2),
+        commitHash.slice(2),
+      ),
+      'utf8',
+    );
+    return JSON.parse(raw) as ParsedCommitObject;
+  } catch {
+    return null;
+  }
+}
+
+async function readCommitReferencedHashes(
+  repoPath: string,
+  commitHash: string,
+): Promise<Set<string>> {
+  const refs = new Set<string>();
+  if (!isFullCommitHash(commitHash)) {
+    return refs;
+  }
+  refs.add(commitHash);
+  const commit = await readCommitObject(repoPath, commitHash);
+  if (!commit) {
+    return refs;
+  }
+  for (const field of COMMIT_OBJECT_HASH_FIELDS) {
+    const value = commit[field];
+    if (typeof value === 'string' && isFullCommitHash(value)) {
+      refs.add(value);
+    }
+  }
+  return refs;
+}
+
+async function tryRemoveEmptyDir(path: string): Promise<void> {
+  try {
+    await rmdir(path);
+  } catch {
+    // Directory is non-empty or already gone; nothing to do.
   }
 }
 
 async function cleanupValidationCommit(input: {
   repoPath: string;
   commitHash: string;
+  protectedHashes: Set<string>;
   logger: Awaited<ReturnType<typeof getLogger>>;
 }): Promise<void> {
   try {
@@ -1308,25 +1420,30 @@ async function cleanupValidationCommit(input: {
       input.commitHash.slice(0, 2),
       input.commitHash.slice(2),
     );
-    const commit = JSON.parse(await readFile(objectPath, 'utf8')) as {
-      snapshot_hash?: unknown;
-    };
-    const snapshotHash =
-      typeof commit.snapshot_hash === 'string' ? commit.snapshot_hash : null;
+    const commit = await readCommitObject(input.repoPath, input.commitHash);
 
-    if (snapshotHash && isFullCommitHash(snapshotHash)) {
-      await removeGfsPath(
-        join(
+    if (commit) {
+      for (const field of COMMIT_OBJECT_HASH_FIELDS) {
+        const value = commit[field];
+        if (typeof value !== 'string' || !isFullCommitHash(value)) continue;
+        if (input.protectedHashes.has(value)) continue;
+
+        const subdir = field === 'snapshot_hash' ? 'snapshots' : 'objects';
+        const shardDir = join(
           input.repoPath,
           '.gfs',
-          'snapshots',
-          snapshotHash.slice(0, 2),
-          snapshotHash.slice(2),
-        ),
-      );
+          subdir,
+          value.slice(0, 2),
+        );
+        await removeGfsPath(join(shardDir, value.slice(2)));
+        await tryRemoveEmptyDir(shardDir);
+      }
     }
 
     await removeGfsPath(objectPath);
+    await tryRemoveEmptyDir(
+      join(input.repoPath, '.gfs', 'objects', input.commitHash.slice(0, 2)),
+    );
   } catch (error) {
     input.logger.warn(
       {
@@ -1697,7 +1814,16 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             },
           };
         } finally {
-          if (shouldStopCompute) {
+          if (baseCommit) {
+            await cleanupValidationBranch({
+              repoPath,
+              branchName,
+              baseCommit,
+              validationCommit,
+              stopCompute: shouldStopCompute,
+              logger,
+            });
+          } else if (shouldStopCompute) {
             await runCommand('gfs', ['compute', 'stop'], {
               cwd: repoPath,
               timeoutMs: COMPUTE_STOP_TIMEOUT_MS,
@@ -1709,13 +1835,6 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
                 },
                 'Failed to stop GFS compute after remediation validation',
               );
-            });
-            await cleanupValidationBranch({
-              repoPath,
-              branchName,
-              baseCommit: baseCommit ?? '',
-              validationCommit,
-              logger,
             });
           }
           await rm(join(workingRoot, GFS_VALIDATION_RUNS_SUBDIR), {
