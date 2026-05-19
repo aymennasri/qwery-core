@@ -90,6 +90,7 @@ describe('SlowQueryOptimizerAgent', () => {
       'Prefer rewrites that reduce rows earlier before considering any non-query remedy.',
       'If the rewrite result is inconclusive or insufficient, stop and state that rewrite-first testing did not prove a fix.',
       'Do not recommend index or schema changes in this agent unless the user explicitly asked for them.',
+      'For up to 5 highest-impact slow queries, include:',
     ];
 
     for (const phrase of requiredPhrases) {
