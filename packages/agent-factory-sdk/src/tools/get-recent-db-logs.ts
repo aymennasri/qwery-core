@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import {
+  getErrorMessage,
   isPostgresDatasource,
   toNumber,
   toSafeLimit,
@@ -151,14 +152,6 @@ export type ParsedPostgresLogSignals = {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim() !== '') {
-    const firstLine = error.message.split('\n')[0]?.trim();
-    return firstLine || 'unknown error';
-  }
-  return 'unknown error';
-}
 
 function truncateText(value: string, maxLength = 600): string {
   if (value.length <= maxLength) return value;
@@ -465,7 +458,7 @@ export const GetRecentDbLogsTool = Tool.define('get_recent_db_logs', {
     return withDatasourceDriver(ctx, async ({ datasource, query }) => {
       if (!isPostgresDatasource(datasource)) {
         throw new Error(
-          `db-performance-audit currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
+          `This tool currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
         );
       }
 

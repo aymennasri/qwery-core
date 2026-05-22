@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Tool } from './tool';
 import {
+  getErrorMessage,
   isPostgresDatasource,
   toNumber,
   toString,
@@ -9,14 +10,6 @@ import {
 
 const DESCRIPTION =
   'Assess PostgreSQL replication health: streaming standby lag, replication slot status and retained WAL, WAL generation rate (PG14+). Returns gracefully empty results when no replication is configured.';
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim() !== '') {
-    const firstLine = error.message.split('\n')[0]?.trim();
-    return firstLine || 'unknown error';
-  }
-  return 'unknown error';
-}
 
 export const GetReplicationHealthTool = Tool.define('get_replication_health', {
   description: DESCRIPTION,

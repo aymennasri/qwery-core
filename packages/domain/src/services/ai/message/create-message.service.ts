@@ -25,7 +25,8 @@ export class CreateMessageService implements CreateMessageUseCase {
     conversationSlug: string;
   }): Promise<Result<MessageOutput, ConversationNotFoundError>> {
     const conversation =
-      await this.conversationRepository.findBySlug(conversationSlug);
+      (await this.conversationRepository.findBySlug(conversationSlug)) ??
+      (await this.conversationRepository.findById(conversationSlug));
     if (!conversation) {
       return Result.fail(new ConversationNotFoundError(conversationSlug));
     }

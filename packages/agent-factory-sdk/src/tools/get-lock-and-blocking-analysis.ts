@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Tool } from './tool';
 import {
+  getErrorMessage,
   isPostgresDatasource,
   toNumber,
   toSafeLimit,
@@ -10,14 +11,6 @@ import {
 
 const DESCRIPTION =
   'Analyze PostgreSQL lock contention: blocking chains via pg_blocking_pids(), idle-in-transaction sessions, lock type distribution, long-running active queries, and cumulative deadlock count.';
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim() !== '') {
-    const firstLine = error.message.split('\n')[0]?.trim();
-    return firstLine || 'unknown error';
-  }
-  return 'unknown error';
-}
 
 export const GetLockAndBlockingAnalysisTool = Tool.define(
   'get_lock_and_blocking_analysis',
@@ -52,7 +45,7 @@ export const GetLockAndBlockingAnalysisTool = Tool.define(
       return withDatasourceDriver(ctx, async ({ datasource, query }) => {
         if (!isPostgresDatasource(datasource)) {
           throw new Error(
-            `db-performance-audit currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
+            `This tool currently supports PostgreSQL datasources only. Received: ${datasource.datasource_provider}`,
           );
         }
 

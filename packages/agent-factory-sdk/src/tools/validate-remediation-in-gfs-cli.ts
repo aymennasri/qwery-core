@@ -1,6 +1,6 @@
 import { execFile, type ExecFileException } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -12,6 +12,10 @@ import {
   isPostgresDatasource,
   resolveAttachedDatasource,
 } from './db-audit/shared';
+import {
+  isSqlRuntimeSettableConfigSetting,
+  normalizeConfigSettingName,
+} from './db-audit/config-coherence';
 
 const DESCRIPTION = `Create a temporary GFS repository from a prepared PostgreSQL dump, create an isolated audit branch, run before/after EXPLAIN ANALYZE measurements around remediation SQL, and return the branch, commits, metrics, and rollback commands. Use this when a recommendation should be validated safely away from the original datasource.`;
 
@@ -27,11 +31,14 @@ const GFS_DUMPS_DIR_ENV_VAR = 'QWERY_GFS_DUMPS_DIR';
 const GFS_DUMP_FILE_ENV_VAR = 'QWERY_GFS_DUMP_FILE';
 const GFS_AUDIT_ROOT_SUBDIR = 'qwery/gfs-audits';
 const GFS_DUMPS_SUBDIR = 'qwery/gfs-dumps';
-const GFS_BASELINES_SUBDIR = 'baselines';
+const GFS_CONVERSATIONS_SUBDIR = 'conversations';
 const GFS_VALIDATION_RUNS_SUBDIR = 'runs';
+const DUMP_FINGERPRINT_FILE = 'dump-fingerprint';
 const MIN_LATENCY_IMPACT_BENCHMARK_MS = 5;
+const HIGH_RESIDUAL_LATENCY_MS = 1000;
 const NEUTRAL_DELTA_ABS_MS = 1;
 const NEUTRAL_DELTA_PCT = 10;
+const MATERIAL_READ_BLOCK_DELTA_ABS = 100;
 const PSQL_BIN_ENV_VAR = 'QWERY_PSQL_BIN';
 const COMMON_POSTGRES_MAJOR_VERSIONS = ['18', '17', '16', '15', '14', '13'];
 
@@ -55,6 +62,7 @@ type ExplainMetrics = {
 
 type ExplainPlanSummary = {
   rootNodeType: string;
+  accessPathSignature: string;
   relationName: string | null;
   indexName: string | null;
   planRows: number | null;
@@ -89,11 +97,12 @@ type ResolvedPostgresClientBinaries = {
   majorVersion: string;
 };
 
-type EnsuredGfsBaseline = {
+type EnsuredGfsSessionRepo = {
   repoPath: string;
-  checkpointCommit: string;
+  baseCommit: string;
   postgresMajorVersion: string;
   psqlBinary: string;
+  computeStarted: boolean;
   reused: boolean;
 };
 
@@ -210,6 +219,57 @@ function inferRollbackStatements(actionStatements: string[]): string[] {
   return rollback;
 }
 
+function extractConfiguredSettingName(statement: string): string | null {
+  const setMatch = statement.match(
+    /^SET(?:\s+LOCAL|\s+SESSION)?\s+([^\s=]+)\s*=/i,
+  );
+  if (setMatch?.[1]) {
+    return normalizeConfigSettingName(setMatch[1]);
+  }
+
+  const resetMatch = statement.match(/^RESET(?:\s+ALL)?\s+([^\s;]+)$/i);
+  if (resetMatch?.[1]) {
+    return normalizeConfigSettingName(resetMatch[1]);
+  }
+
+  return null;
+}
+
+function validateConfigActionStatements(
+  input: PartitionedActionStatements,
+): void {
+  if (input.persistentStatements.length > 0) {
+    throw new Error(
+      'Config validation only supports session-scoped SET/SET LOCAL/RESET statements; persistent SQL actions are not allowed.',
+    );
+  }
+
+  if (input.sessionSetupStatements.length === 0) {
+    throw new Error(
+      'Config validation requires at least one SET or SET LOCAL statement.',
+    );
+  }
+
+  const allStatements = [
+    ...input.sessionSetupStatements,
+    ...input.sessionTeardownStatements,
+  ];
+  for (const statement of allStatements) {
+    const settingName = extractConfiguredSettingName(statement);
+    if (!settingName) {
+      throw new Error(
+        `Unsupported config validation statement: ${statement}. Use SET/SET LOCAL and RESET only.`,
+      );
+    }
+
+    if (!isSqlRuntimeSettableConfigSetting(settingName)) {
+      throw new Error(
+        `Config validation only supports SQL-runtime-settable settings. Received: ${settingName}.`,
+      );
+    }
+  }
+}
+
 function buildSessionScopedExplainSql(input: {
   validationQuery: string;
   sessionSetupStatements: string[];
@@ -296,8 +356,25 @@ function parseExplainPlanSummary(raw: string): ExplainPlanSummary {
   const stringOrNull = (value: unknown): string | null =>
     typeof value === 'string' && value.trim() !== '' ? value : null;
 
+  const collectAccessPaths = (node: Record<string, unknown>): string[] => {
+    const nodeType = stringOrNull(node['Node Type']) ?? 'Unknown';
+    const relationName = stringOrNull(node['Relation Name']) ?? '';
+    const indexName = stringOrNull(node['Index Name']) ?? '';
+    const ownPath = `${nodeType}:${relationName}:${indexName}`;
+    const children = Array.isArray(node.Plans)
+      ? node.Plans.flatMap((child) =>
+          typeof child === 'object' && child !== null
+            ? collectAccessPaths(child as Record<string, unknown>)
+            : [],
+        )
+      : [];
+
+    return [ownPath, ...children];
+  };
+
   return {
     rootNodeType: stringOrNull(planNode['Node Type']) ?? 'Unknown',
+    accessPathSignature: collectAccessPaths(planNode).join('|'),
     relationName: stringOrNull(planNode['Relation Name']),
     indexName: stringOrNull(planNode['Index Name']),
     planRows: numberOrNull(planNode['Plan Rows']),
@@ -318,6 +395,7 @@ function assessValidationResult(
   before: ExplainAnalysis,
   after: ExplainAnalysis,
   validationType: ValidationType = 'latency',
+  actionStatements: string[] = [],
 ): ValidationAssessment {
   const totalDeltaMs = after.totalTimeMs - before.totalTimeMs;
   const deltaPct =
@@ -335,6 +413,27 @@ function assessValidationResult(
     before.totalTimeMs >= MIN_LATENCY_IMPACT_BENCHMARK_MS
       ? 'latency-impact'
       : 'low-latency';
+  const accessPathChanged =
+    before.plan.accessPathSignature !== after.plan.accessPathSignature;
+  const readBlockDelta =
+    before.plan.sharedReadBlocks !== null &&
+    after.plan.sharedReadBlocks !== null
+      ? after.plan.sharedReadBlocks - before.plan.sharedReadBlocks
+      : null;
+  const readBlockDeltaPct =
+    readBlockDelta !== null &&
+    before.plan.sharedReadBlocks !== null &&
+    before.plan.sharedReadBlocks > 0
+      ? (readBlockDelta / before.plan.sharedReadBlocks) * 100
+      : null;
+  const materiallyReducedReads =
+    readBlockDelta !== null &&
+    readBlockDeltaPct !== null &&
+    readBlockDelta <= -MATERIAL_READ_BLOCK_DELTA_ABS &&
+    readBlockDeltaPct <= -NEUTRAL_DELTA_PCT;
+  const testsIndexChange = actionStatements.some((statement) =>
+    /^CREATE\s+(?:UNIQUE\s+)?INDEX(?:\s+CONCURRENTLY)?\b/i.test(statement),
+  );
 
   const cautions: string[] = [];
   if (benchmarkSuitability === 'low-latency') {
@@ -342,9 +441,9 @@ function assessValidationResult(
       `Benchmark total time before the change was under ${MIN_LATENCY_IMPACT_BENCHMARK_MS}ms; do not frame this as a user-facing latency-impact finding without a slower representative query.`,
     );
   }
-  if (before.plan.rootNodeType === after.plan.rootNodeType) {
+  if (!accessPathChanged) {
     cautions.push(
-      `The root plan node stayed ${before.plan.rootNodeType}; timing changes may reflect runtime variance rather than a clear plan-shape shift.`,
+      `The access-path signature did not change; timing changes may reflect runtime variance rather than a clear plan-shape shift.`,
     );
   }
 
@@ -355,19 +454,6 @@ function assessValidationResult(
   }
 
   if (validationType === 'config') {
-    const beforeReadBlocks = before.plan.sharedReadBlocks;
-    const afterReadBlocks = after.plan.sharedReadBlocks;
-    const readBlockDelta =
-      beforeReadBlocks !== null && afterReadBlocks !== null
-        ? afterReadBlocks - beforeReadBlocks
-        : null;
-    const readBlockDeltaPct =
-      readBlockDelta !== null &&
-      beforeReadBlocks !== null &&
-      beforeReadBlocks > 0
-        ? (readBlockDelta / beforeReadBlocks) * 100
-        : null;
-
     if (timingOutcome === 'regressed') {
       return {
         timingOutcome,
@@ -378,12 +464,7 @@ function assessValidationResult(
       };
     }
 
-    if (
-      readBlockDelta !== null &&
-      readBlockDeltaPct !== null &&
-      readBlockDelta <= -100 &&
-      readBlockDeltaPct <= -NEUTRAL_DELTA_PCT
-    ) {
+    if (materiallyReducedReads) {
       return {
         timingOutcome,
         recommendationStatus: 'validated',
@@ -430,14 +511,44 @@ function assessValidationResult(
   }
 
   if (timingOutcome === 'improved') {
+    if (
+      after.totalTimeMs >= HIGH_RESIDUAL_LATENCY_MS &&
+      deltaPct !== null &&
+      Math.abs(deltaPct) < 50
+    ) {
+      cautions.push(
+        `The benchmark remains above ${HIGH_RESIDUAL_LATENCY_MS}ms after the change and improved by less than 50%; treat this as a partial improvement, not a production-ready quick win.`,
+      );
+      return {
+        timingOutcome,
+        recommendationStatus: 'inconclusive',
+        benchmarkSuitability,
+        rationale: `The tested change improved the representative benchmark, but residual latency remains high at ${after.totalTimeMs.toFixed(3)}ms.`,
+        cautions,
+      };
+    }
+
+    if (testsIndexChange && !accessPathChanged && !materiallyReducedReads) {
+      cautions.push(
+        'Index validation requires either a changed access path or material shared-read-block reduction; timing-only improvement may be cache/runtime variance.',
+      );
+      return {
+        timingOutcome,
+        recommendationStatus: 'inconclusive',
+        benchmarkSuitability,
+        rationale:
+          'The tested index change improved timing, but did not change the access path or materially reduce shared read blocks.',
+        cautions,
+      };
+    }
+
     return {
       timingOutcome,
       recommendationStatus: 'validated',
       benchmarkSuitability,
-      rationale:
-        before.plan.rootNodeType === after.plan.rootNodeType
-          ? 'The tested change improved the representative benchmark, but the plan root node did not change.'
-          : `The tested change improved the representative benchmark and shifted the root plan node from ${before.plan.rootNodeType} to ${after.plan.rootNodeType}.`,
+      rationale: !accessPathChanged
+        ? 'The tested change improved the representative benchmark, but the access-path signature did not change.'
+        : 'The tested change improved the representative benchmark and changed the access-path signature.',
       cautions,
     };
   }
@@ -896,7 +1007,7 @@ async function runGfsImportWithRetry(
   }
 
   throw new Error(
-    `Timed out importing the baseline dump into the GFS PostgreSQL instance after ${POSTGRES_READY_TIMEOUT_MS}ms. Last error: ${lastError?.message ?? 'unknown error'}`,
+    `Timed out importing the prepared dump into the GFS PostgreSQL instance after ${POSTGRES_READY_TIMEOUT_MS}ms. Last error: ${lastError?.message ?? 'unknown error'}`,
   );
 }
 
@@ -968,26 +1079,11 @@ async function resolvePostgresClientBinaries(
   };
 }
 
-async function buildGfsBaselineCacheKey(input: {
+function buildGfsConversationRepoKey(input: {
+  conversationId: string;
   datasourceId: string;
-  connectionUrl: string;
-  dumpPath: string;
-}): Promise<string> {
-  const dumpStat = await stat(input.dumpPath);
-  const hash = createHash('sha256')
-    .update(input.datasourceId)
-    .update('\0')
-    .update(input.connectionUrl)
-    .update('\0')
-    .update(input.dumpPath)
-    .update('\0')
-    .update(String(dumpStat.size))
-    .update('\0')
-    .update(String(Math.trunc(dumpStat.mtimeMs)))
-    .digest('hex')
-    .slice(0, 24);
-
-  return `${sanitizeDumpName(input.datasourceId)}-${hash}`;
+}): string {
+  return `${sanitizeDumpName(input.conversationId)}-${sanitizeDumpName(input.datasourceId)}`;
 }
 
 async function readBranchCommit(
@@ -1027,10 +1123,7 @@ function isMissingGfsInstanceError(error: unknown): boolean {
 async function clearGfsRuntimeConfig(repoPath: string): Promise<void> {
   const configPath = join(repoPath, '.gfs', 'config.toml');
   const config = await readFile(configPath, 'utf8');
-  const withoutRuntime = config.replace(
-    /\n\[runtime\]\n(?:[^\n\[]+\n?)*/,
-    '\n',
-  );
+  const withoutRuntime = config.replace(/\n\[runtime\]\n(?:[^\n[]+\n?)*/, '\n');
 
   if (withoutRuntime !== config) {
     await writeFile(configPath, withoutRuntime);
@@ -1069,31 +1162,72 @@ async function removeGfsPath(path: string): Promise<void> {
   }
 }
 
-async function ensureGfsBaselineRepo(input: {
-  baselineDir: string;
+async function computeDumpFingerprint(dumpPath: string): Promise<string> {
+  const stats = await stat(dumpPath);
+  return `${stats.size}:${Math.trunc(stats.mtimeMs)}`;
+}
+
+async function readCachedDumpFingerprint(
+  sessionDir: string,
+): Promise<string | null> {
+  try {
+    const raw = await readFile(join(sessionDir, DUMP_FINGERPRINT_FILE), 'utf8');
+    const trimmed = raw.trim();
+    return trimmed === '' ? null : trimmed;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCachedDumpFingerprint(
+  sessionDir: string,
+  fingerprint: string,
+): Promise<void> {
+  await writeFile(join(sessionDir, DUMP_FINGERPRINT_FILE), fingerprint);
+}
+
+async function ensureGfsSessionRepo(input: {
+  sessionDir: string;
   repoPath: string;
   connectionUrl: string;
   dumpPath: string;
   signal: AbortSignal;
   logger: Awaited<ReturnType<typeof getLogger>>;
-}): Promise<EnsuredGfsBaseline> {
+}): Promise<EnsuredGfsSessionRepo> {
   const postgresClients = await resolvePostgresClientBinaries(
     input.connectionUrl,
     input.signal,
   );
 
-  const cachedCheckpointCommit = await readBranchCommit(input.repoPath, 'main');
-  if (cachedCheckpointCommit) {
+  const currentDumpFingerprint = await computeDumpFingerprint(input.dumpPath);
+  const cachedBaseCommit = await readBranchCommit(input.repoPath, 'main');
+  const cachedDumpFingerprint = cachedBaseCommit
+    ? await readCachedDumpFingerprint(input.sessionDir)
+    : null;
+
+  if (cachedBaseCommit && cachedDumpFingerprint === currentDumpFingerprint) {
     return {
       repoPath: input.repoPath,
-      checkpointCommit: cachedCheckpointCommit,
+      baseCommit: cachedBaseCommit,
       postgresMajorVersion: postgresClients.majorVersion,
       psqlBinary: postgresClients.psql,
+      computeStarted: false,
       reused: true,
     };
   }
 
-  await rm(input.baselineDir, { recursive: true, force: true });
+  if (cachedBaseCommit) {
+    input.logger.info(
+      {
+        sessionDir: input.sessionDir,
+        cachedDumpFingerprint,
+        currentDumpFingerprint,
+      },
+      'Cached GFS session repo dump fingerprint mismatch; rebuilding from current dump',
+    );
+  }
+
+  await rm(input.sessionDir, { recursive: true, force: true });
   await mkdir(input.repoPath, { recursive: true });
 
   try {
@@ -1126,20 +1260,19 @@ async function ensureGfsBaselineRepo(input: {
     await runGfsImportWithRetry(input.repoPath, input.dumpPath, input.signal);
     await runCommand(
       'gfs',
-      ['commit', '-m', 'baseline snapshot before audit remediation'],
+      ['commit', '-m', 'session base snapshot before audit remediation'],
       { cwd: input.repoPath, signal: input.signal },
     );
 
-    const checkpointCommit = await readLatestCommitHash(
-      input.repoPath,
-      input.signal,
-    );
+    const baseCommit = await readLatestCommitHash(input.repoPath, input.signal);
+    await writeCachedDumpFingerprint(input.sessionDir, currentDumpFingerprint);
 
     return {
       repoPath: input.repoPath,
-      checkpointCommit,
+      baseCommit,
       postgresMajorVersion: postgresClients.majorVersion,
       psqlBinary: postgresClients.psql,
+      computeStarted: true,
       reused: false,
     };
   } catch (error) {
@@ -1148,10 +1281,10 @@ async function ensureGfsBaselineRepo(input: {
         repoPath: input.repoPath,
         error: error instanceof Error ? error.message : String(error),
       },
-      'Failed to create cached GFS baseline repo; removing partial baseline directory',
+      'Failed to create conversation-scoped GFS repo; removing partial session directory',
     );
-    await rm(input.baselineDir, { recursive: true, force: true }).catch(() => {
-      // Best-effort cleanup of partial baseline state.
+    await rm(input.sessionDir, { recursive: true, force: true }).catch(() => {
+      // Best-effort cleanup of partial session repo state.
     });
     throw error;
   }
@@ -1160,8 +1293,9 @@ async function ensureGfsBaselineRepo(input: {
 async function cleanupValidationBranch(input: {
   repoPath: string;
   branchName: string;
-  baselineCommit: string;
+  baseCommit: string;
   validationCommit: string | null;
+  stopCompute: boolean;
   logger: Awaited<ReturnType<typeof getLogger>>;
 }): Promise<void> {
   await runCommand('gfs', ['checkout', 'main'], {
@@ -1183,16 +1317,18 @@ async function cleanupValidationBranch(input: {
         branchName: input.branchName,
         error: error instanceof Error ? error.message : String(error),
       },
-      'Failed to return cached GFS validation repo to main before cleanup',
+      'Failed to return conversation-scoped GFS repo to main before cleanup',
     );
   });
 
-  await runCommand('gfs', ['compute', 'stop'], {
-    cwd: input.repoPath,
-    timeoutMs: COMPUTE_STOP_TIMEOUT_MS,
-  }).catch(() => {
-    // The main compute instance may already be stopped.
-  });
+  if (input.stopCompute) {
+    await runCommand('gfs', ['compute', 'stop'], {
+      cwd: input.repoPath,
+      timeoutMs: COMPUTE_STOP_TIMEOUT_MS,
+    }).catch(() => {
+      // The main compute instance may already be stopped.
+    });
+  }
 
   await Promise.all([
     removeGfsPath(join(input.repoPath, '.gfs', 'workspaces', input.branchName)),
@@ -1206,25 +1342,89 @@ async function cleanupValidationBranch(input: {
         branchName: input.branchName,
         error: error instanceof Error ? error.message : String(error),
       },
-      'Failed to cleanup cached GFS validation branch state',
+      'Failed to cleanup conversation-scoped GFS validation branch state',
     );
   });
 
-  if (
-    input.validationCommit &&
-    input.validationCommit !== input.baselineCommit
-  ) {
+  if (input.validationCommit && input.validationCommit !== input.baseCommit) {
+    const protectedHashes = await readCommitReferencedHashes(
+      input.repoPath,
+      input.baseCommit,
+    );
     await cleanupValidationCommit({
       repoPath: input.repoPath,
       commitHash: input.validationCommit,
+      protectedHashes,
       logger: input.logger,
     });
+  }
+}
+
+const COMMIT_OBJECT_HASH_FIELDS = [
+  'snapshot_hash',
+  'schema_hash',
+  'files_ref',
+] as const;
+
+type ParsedCommitObject = Partial<
+  Record<(typeof COMMIT_OBJECT_HASH_FIELDS)[number], unknown>
+>;
+
+async function readCommitObject(
+  repoPath: string,
+  commitHash: string,
+): Promise<ParsedCommitObject | null> {
+  try {
+    const raw = await readFile(
+      join(
+        repoPath,
+        '.gfs',
+        'objects',
+        commitHash.slice(0, 2),
+        commitHash.slice(2),
+      ),
+      'utf8',
+    );
+    return JSON.parse(raw) as ParsedCommitObject;
+  } catch {
+    return null;
+  }
+}
+
+async function readCommitReferencedHashes(
+  repoPath: string,
+  commitHash: string,
+): Promise<Set<string>> {
+  const refs = new Set<string>();
+  if (!isFullCommitHash(commitHash)) {
+    return refs;
+  }
+  refs.add(commitHash);
+  const commit = await readCommitObject(repoPath, commitHash);
+  if (!commit) {
+    return refs;
+  }
+  for (const field of COMMIT_OBJECT_HASH_FIELDS) {
+    const value = commit[field];
+    if (typeof value === 'string' && isFullCommitHash(value)) {
+      refs.add(value);
+    }
+  }
+  return refs;
+}
+
+async function tryRemoveEmptyDir(path: string): Promise<void> {
+  try {
+    await rmdir(path);
+  } catch {
+    // Directory is non-empty or already gone; nothing to do.
   }
 }
 
 async function cleanupValidationCommit(input: {
   repoPath: string;
   commitHash: string;
+  protectedHashes: Set<string>;
   logger: Awaited<ReturnType<typeof getLogger>>;
 }): Promise<void> {
   try {
@@ -1235,25 +1435,30 @@ async function cleanupValidationCommit(input: {
       input.commitHash.slice(0, 2),
       input.commitHash.slice(2),
     );
-    const commit = JSON.parse(await readFile(objectPath, 'utf8')) as {
-      snapshot_hash?: unknown;
-    };
-    const snapshotHash =
-      typeof commit.snapshot_hash === 'string' ? commit.snapshot_hash : null;
+    const commit = await readCommitObject(input.repoPath, input.commitHash);
 
-    if (snapshotHash && isFullCommitHash(snapshotHash)) {
-      await removeGfsPath(
-        join(
+    if (commit) {
+      for (const field of COMMIT_OBJECT_HASH_FIELDS) {
+        const value = commit[field];
+        if (typeof value !== 'string' || !isFullCommitHash(value)) continue;
+        if (input.protectedHashes.has(value)) continue;
+
+        const subdir = field === 'snapshot_hash' ? 'snapshots' : 'objects';
+        const shardDir = join(
           input.repoPath,
           '.gfs',
-          'snapshots',
-          snapshotHash.slice(0, 2),
-          snapshotHash.slice(2),
-        ),
-      );
+          subdir,
+          value.slice(0, 2),
+        );
+        await removeGfsPath(join(shardDir, value.slice(2)));
+        await tryRemoveEmptyDir(shardDir);
+      }
     }
 
     await removeGfsPath(objectPath);
+    await tryRemoveEmptyDir(
+      join(input.repoPath, '.gfs', 'objects', input.commitHash.slice(0, 2)),
+    );
   } catch (error) {
     input.logger.warn(
       {
@@ -1261,22 +1466,10 @@ async function cleanupValidationCommit(input: {
         commitHash: input.commitHash,
         error: error instanceof Error ? error.message : String(error),
       },
-      'Failed to cleanup cached GFS validation commit state',
+      'Failed to cleanup conversation-scoped GFS validation commit state',
     );
   }
 }
-
-export const __testables = {
-  assessValidationResult,
-  buildSessionScopedExplainSql,
-  extractExplainJsonPayload,
-  isRetryablePostgresStartupError,
-  partitionActionStatements,
-  parseExplainPlanSummary,
-  parseCommitHash,
-  parseExplainMetrics,
-  runGfsValidationExclusive,
-};
 
 async function readGfsStatus(
   repoPath: string,
@@ -1330,6 +1523,36 @@ async function readGfsConnectionUrl(
     branch: parsed.current_branch,
     connectionUrl,
   };
+}
+
+function isMissingGfsConnectionStringError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes(
+      'GFS status did not return a database connection string.',
+    )
+  );
+}
+
+async function ensureGfsConnectionUrl(
+  repoPath: string,
+  signal: AbortSignal,
+): Promise<{ branch: string; connectionUrl: string; startedCompute: boolean }> {
+  try {
+    const status = await readGfsConnectionUrl(repoPath, signal);
+    return { ...status, startedCompute: false };
+  } catch (error) {
+    if (!isMissingGfsConnectionStringError(error)) {
+      throw error;
+    }
+  }
+
+  await runCommand('gfs', ['compute', 'start'], {
+    cwd: repoPath,
+    signal,
+  });
+  const status = await readGfsConnectionUrl(repoPath, signal);
+  return { ...status, startedCompute: true };
 }
 
 export const ValidateRemediationInGfsCliTool = Tool.define(
@@ -1387,6 +1610,10 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
         const partitionedStatements =
           partitionActionStatements(actionStatements);
 
+        if (params.validationType === 'config') {
+          validateConfigActionStatements(partitionedStatements);
+        }
+
         const logger = await getLogger();
         const { datasource } = await resolveAttachedDatasource(ctx);
 
@@ -1422,17 +1649,16 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
 
         const workingRoot = resolveGfsAuditWorkingRoot();
         await mkdir(workingRoot, { recursive: true });
-        const baselineCacheKey = await buildGfsBaselineCacheKey({
+        const sessionRepoKey = buildGfsConversationRepoKey({
+          conversationId: ctx.conversationId,
           datasourceId: datasource.id,
-          connectionUrl,
-          dumpPath,
         });
-        const baselineDir = join(
+        const sessionDir = join(
           workingRoot,
-          GFS_BASELINES_SUBDIR,
-          baselineCacheKey,
+          GFS_CONVERSATIONS_SUBDIR,
+          sessionRepoKey,
         );
-        const repoPath = join(baselineDir, 'repo');
+        const repoPath = join(sessionDir, 'repo');
 
         logger.info(
           {
@@ -1441,67 +1667,68 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             datasourceProvider: datasource.datasource_provider,
             branchName,
             dumpPath,
-            baselineCacheKey,
+            sessionRepoKey,
             repoPath,
           },
           'Starting GFS CLI remediation validation',
         );
 
         let shouldStopCompute = false;
-        let baselineCommit: string | null = null;
+        let baseCommit: string | null = null;
         let validationCommit: string | null = null;
 
         try {
           await runCommand('gfs', ['version'], { signal: ctx.abort });
 
-          const baseline = await ensureGfsBaselineRepo({
-            baselineDir,
+          const sessionRepo = await ensureGfsSessionRepo({
+            sessionDir,
             repoPath,
             connectionUrl,
             dumpPath,
             signal: ctx.abort,
             logger,
           });
-          shouldStopCompute = true;
-          baselineCommit = baseline.checkpointCommit;
+          shouldStopCompute = sessionRepo.computeStarted;
+          baseCommit = sessionRepo.baseCommit;
 
           await ctx.metadata({
-            title: baseline.reused
-              ? 'Reused cached GFS baseline repo'
-              : 'Created cached GFS baseline repo',
+            title: sessionRepo.reused
+              ? 'Reused conversation-scoped GFS repo'
+              : 'Created conversation-scoped GFS repo',
             metadata: {
-              baselineDir,
-              repoPath: baseline.repoPath,
-              baselineCacheKey,
-              reusedBaseline: baseline.reused,
-              checkpointCommit: baseline.checkpointCommit,
-              postgresMajorVersion: baseline.postgresMajorVersion,
-              psqlBinary: baseline.psqlBinary,
+              sessionDir,
+              repoPath: sessionRepo.repoPath,
+              sessionRepoKey,
+              reusedSessionRepo: sessionRepo.reused,
+              baseCommit: sessionRepo.baseCommit,
+              postgresMajorVersion: sessionRepo.postgresMajorVersion,
+              psqlBinary: sessionRepo.psqlBinary,
               dumpPath,
             },
           });
 
           await runCommand(
             'gfs',
-            ['checkout', '-b', branchName, baseline.checkpointCommit],
+            ['checkout', '-b', branchName, sessionRepo.baseCommit],
             {
-              cwd: baseline.repoPath,
+              cwd: sessionRepo.repoPath,
               signal: ctx.abort,
             },
           );
 
-          const statusBefore = await readGfsConnectionUrl(
-            baseline.repoPath,
+          const statusBefore = await ensureGfsConnectionUrl(
+            sessionRepo.repoPath,
             ctx.abort,
           );
+          shouldStopCompute = shouldStopCompute || statusBefore.startedCompute;
           await waitForPostgresReady(
-            baseline.psqlBinary,
+            sessionRepo.psqlBinary,
             statusBefore.connectionUrl,
             ctx.abort,
           );
           const before = parseExplainAnalysis(
             await runPsqlWithRetry(
-              baseline.psqlBinary,
+              sessionRepo.psqlBinary,
               statusBefore.connectionUrl,
               buildExplainSql(params.validationQuery),
               ctx.abort,
@@ -1510,7 +1737,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
 
           for (const statement of partitionedStatements.persistentStatements) {
             await runPsqlWithRetry(
-              baseline.psqlBinary,
+              sessionRepo.psqlBinary,
               statusBefore.connectionUrl,
               statement,
               ctx.abort,
@@ -1522,23 +1749,24 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
               'gfs',
               ['commit', '-m', 'apply audit remediation candidate'],
               {
-                cwd: baseline.repoPath,
+                cwd: sessionRepo.repoPath,
                 signal: ctx.abort,
               },
             );
           }
 
           const afterCommit = await readLatestCommitHash(
-            baseline.repoPath,
+            sessionRepo.repoPath,
             ctx.abort,
           );
           validationCommit = afterCommit;
-          const statusAfter = await readGfsConnectionUrl(
-            baseline.repoPath,
+          const statusAfter = await ensureGfsConnectionUrl(
+            sessionRepo.repoPath,
             ctx.abort,
           );
+          shouldStopCompute = shouldStopCompute || statusAfter.startedCompute;
           await waitForPostgresReady(
-            baseline.psqlBinary,
+            sessionRepo.psqlBinary,
             statusAfter.connectionUrl,
             ctx.abort,
           );
@@ -1555,7 +1783,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
               : buildExplainSql(params.validationQuery);
           const after = parseExplainAnalysis(
             await runPsqlWithRetry(
-              baseline.psqlBinary,
+              sessionRepo.psqlBinary,
               statusAfter.connectionUrl,
               afterExplainSql,
               ctx.abort,
@@ -1576,6 +1804,7 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             before,
             after,
             params.validationType,
+            actionStatements,
           );
 
           return {
@@ -1586,12 +1815,12 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
               provider: datasource.datasource_provider,
             },
             gfs: {
-              repoPath: baseline.repoPath,
+              repoPath: sessionRepo.repoPath,
               branchName: statusAfter.branch,
-              checkpointCommit: baseline.checkpointCommit,
+              checkpointCommit: sessionRepo.baseCommit,
               afterCommit,
               rollback: {
-                restoreCheckpoint: `gfs checkout ${baseline.checkpointCommit}`,
+                restoreCheckpoint: `gfs checkout ${sessionRepo.baseCommit}`,
                 returnToBranch: `gfs checkout ${statusAfter.branch}`,
                 sql: rollbackStatements,
               },
@@ -1611,7 +1840,16 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
             },
           };
         } finally {
-          if (shouldStopCompute) {
+          if (baseCommit) {
+            await cleanupValidationBranch({
+              repoPath,
+              branchName,
+              baseCommit,
+              validationCommit,
+              stopCompute: shouldStopCompute,
+              logger,
+            });
+          } else if (shouldStopCompute) {
             await runCommand('gfs', ['compute', 'stop'], {
               cwd: repoPath,
               timeoutMs: COMPUTE_STOP_TIMEOUT_MS,
@@ -1623,13 +1861,6 @@ export const ValidateRemediationInGfsCliTool = Tool.define(
                 },
                 'Failed to stop GFS compute after remediation validation',
               );
-            });
-            await cleanupValidationBranch({
-              repoPath,
-              branchName,
-              baselineCommit: baselineCommit ?? '',
-              validationCommit,
-              logger,
             });
           }
           await rm(join(workingRoot, GFS_VALIDATION_RUNS_SUBDIR), {

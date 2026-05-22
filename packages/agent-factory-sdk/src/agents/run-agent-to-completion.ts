@@ -237,7 +237,7 @@ export async function runAgentToCompletion(
     repositories.usage,
     repositories.conversation,
     repositories.project,
-    conversationSlug,
+    conversationId,
   );
   if (rawUsage) {
     usagePersistenceService
@@ -255,7 +255,7 @@ export async function runAgentToCompletion(
   const persistence = new MessagePersistenceService(
     repositories.message,
     repositories.conversation,
-    conversationSlug,
+    conversationId,
   );
   try {
     const options: PersistMessageOptions = {

@@ -76,6 +76,43 @@ describe('DbPerformanceAuditAgent', () => {
       'Do not append remediation prose under this section unless the remediation was successfully validated in GFS',
       'If fewer than 3 validated actions exist, list only those actions. Do not fill the section with unvalidated ideas.',
       'Do not mention any next action in the conclusion unless it appears in the successful GFS validation set.',
+      'choose representative validation literals from observed data distribution rather than arbitrary convenient values',
+      'sampled literals tested, selected EXPLAIN literal',
+      'flag it as a parameter-sensitivity or unreproduced-hotspot finding instead of removing it from top findings',
+      'Finding selection is independent from remediation success',
+      'Do not use GFS validation success as a filter for whether a workload problem appears as a finding',
+      'Do not omit a higher-impact eligible finding in favor of a lower-impact finding solely because the lower-impact finding has a validated remediation',
+    ];
+
+    for (const phrase of requiredPhrases) {
+      expect(DB_PERFORMANCE_AUDIT_PROMPT).toContain(phrase);
+    }
+  });
+
+  it('instructs the agent to calculate config recommendation targets', () => {
+    const requiredPhrases = [
+      'Calculated recommendation rules',
+      'Use formulas as transparent sizing heuristics and starting points',
+      'Produce a calculated target for tunables only when the required inputs are available and the target is relevant to observed symptoms',
+      'If the formula output conflicts with observed workload behavior',
+      'Do not invent host RAM, CPU cores, storage type, or active query concurrency',
+      'Do not apply RAM-dependent missing-input text to non-RAM settings',
+      'not formula-based',
+      'not calculated - missing storage type',
+      'work_mem` as memory per sort/hash operation',
+      'hash_mem_multiplier` when sizing hash-heavy workloads',
+      'host or container memory and logical CPU count',
+      'If `max_parallel_workers_per_gather` is 0 or clearly under-provisioned and logical CPU count is known, provide a concrete calculated target',
+      'derive a conservative default budget from observed memory',
+      'reserve 25-40% of RAM for OS/filesystem cache',
+      'prefer a concrete conservative `work_mem` target over `not calculated - missing query_memory_budget policy`',
+      'estimated_peak_memory = shared_buffers + (active_complex_queries * sort_hash_ops_per_query * work_mem_or_hash_limit) + maintenance_work_mem + (autovacuum_max_workers * autovacuum_work_mem)',
+      'Apply a single coherence pass across RAM-sensitive settings before writing final Section 7 targets',
+      'cap assumption-driven outputs at `64 MB`',
+      '| Setting | Observed | Calculated Target | Formula Inputs | Gap | Severity |',
+      'not calculated - missing host RAM',
+      'only test settings that can be changed in SQL with `SET`, `SET LOCAL`, and `RESET` during the validation session',
+      'Do not schedule GFS config validations for restart-only or config-file-only settings such as `shared_buffers`',
     ];
 
     for (const phrase of requiredPhrases) {

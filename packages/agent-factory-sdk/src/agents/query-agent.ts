@@ -12,6 +12,7 @@ export const QueryAgent = Agent.define('query', {
       'detect_db_engine',
       'get_top_slow_queries',
       'explain_query_plan',
+      'compare_query_rewrite',
       'get_index_health',
       'get_table_health',
       'get_infra_runtime_signals',

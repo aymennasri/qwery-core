@@ -18,7 +18,9 @@ vi.mock('@qwery/agent-factory-sdk/tools/registry', () => ({
   Registry: {
     agents: {
       get: vi.fn((agentId: string) =>
-        agentId === 'db-performance-audit' ? { id: agentId } : undefined,
+        ['db-performance-audit', 'slow-query-optimizer'].includes(agentId)
+          ? { id: agentId }
+          : undefined,
       ),
     },
   },
@@ -141,6 +143,32 @@ describe('Server API - Chat', () => {
       expect.objectContaining({
         mcpServerUrl: 'http://localhost/mcp',
         mcpServers: [{ url: 'http://localhost/mcp' }],
+      }),
+    );
+  });
+
+  it('accepts the slow-query-optimizer agent id', async () => {
+    const { createChatRoutes } = await import('../src/routes/chat');
+    const app = createChatRoutes();
+
+    const response = await app.request('http://localhost/test-slug', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: 'slow-query-optimizer',
+        messages: [
+          {
+            role: 'user',
+            parts: [{ type: 'text', text: 'Optimize my slowest queries' }],
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(promptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'slow-query-optimizer',
       }),
     );
   });

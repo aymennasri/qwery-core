@@ -2,6 +2,11 @@ import type { ModelsDevCatalog } from '@qwery/shared/model-cost';
 
 export const SUPPORTED_MODELS = [
   {
+    name: 'Azure • GPT-5.3 Codex',
+    shortName: 'GPT-5.3 Codex',
+    value: 'azure/gpt-5.3-codex',
+  },
+  {
     name: 'Azure • GPT-5.2 Codex',
     shortName: 'GPT-5.2 Codex',
     value: 'azure/gpt-5.2-codex',
