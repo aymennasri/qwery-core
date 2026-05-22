@@ -11,7 +11,9 @@ export async function runVersion(): Promise<void> {
   console.log(`db-audit ${pkg.version}`);
   console.log(`git ${gitSha}`);
   console.log('agent db-performance-audit');
-  console.log('tools db_audit_diagnostics, db_audit_plan, validate_remediation_in_gfs_cli');
+  console.log(
+    'tools detect_db_engine, get_top_slow_queries, explain_query_plan, get_index_health, get_table_health, get_infra_runtime_signals, get_recent_db_logs, get_lock_and_blocking_analysis, get_statistics_health, get_bloat_estimates, get_replication_health, validate_remediation_in_gfs_cli',
+  );
 }
 
 async function readPackageJson(): Promise<{ version: string }> {

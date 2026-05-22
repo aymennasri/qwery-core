@@ -19,6 +19,8 @@ export type DumpResolution = {
 };
 
 export async function resolveDump(options: DumpOptions): Promise<DumpResolution> {
+  parsePostgresUrl(options.url);
+
   if (options.dump && options.dumpDir) {
     throw new CliError('Use only one of --dump or --dump-dir.');
   }
